@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <title>Alpina Signal</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <!-- TradingView Widget -->
+    <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="user-info">
+                <div class="avatar">⛰️</div>
+                <div class="user-details">
+                    <div class="username" id="username">Loading...</div>
+                    <div class="user-id">ID: <span id="userId">...</span></div>
+                </div>
+            </div>
+            <button class="support-btn" id="supportBtn" onclick="openSupport()">
+                👨‍💼
+            </button>
+        </header>
+
+        <!-- Navigation -->
+        <nav class="nav">
+            <button class="nav-btn active" onclick="showSignalsTab()">Signals</button>
+            <button class="nav-btn" onclick="showAboutTab()">About</button>
+            <button class="nav-btn" onclick="showSubscriptionModal()">Subscribe</button>
+        </nav>
+
+        <!-- Free Attempts Banner -->
+        <div class="attempts-banner">
+            <span>🎁 Free trials: <strong id="attemptsCount">2 / 2</strong></span>
+        </div>
+
+        <!-- Main Content -->
+        <div class="content" id="signalsContent">
+            <!-- Coin Selection -->
+            <div class="form-group">
+                <label>Coin</label>
+                <select class="select-input" id="coinSelect">
+                    <option value="BTCUSDT">BTC / USDT</option>
+                    <option value="ETHUSDT">ETH / USDT</option>
+                    <option value="SOLUSDT">SOL / USDT</option>
+                    <option value="BNBUSDT">BNB / USDT</option>
+                    <option value="XRPUSDT">XRP / USDT</option>
+                    <option value="ADAUSDT">ADA / USDT</option>
+                    <option value="AVAXUSDT">AVAX / USDT</option>
+                    <option value="LINKUSDT">LINK / USDT</option>
+                    <option value="DOTUSDT">DOT / USDT</option>
+                    <option value="MATICUSDT">MATIC / USDT</option>
+                    <option value="LTCUSDT">LTC / USDT</option>
+                    <option value="OPUSDT">OP / USDT</option>
+                    <option value="ARBUSDT">ARB / USDT</option>
+                    <option value="DOGEUSDT">DOGE / USDT</option>
+                    <option value="TRXUSDT">TRX / USDT</option>
+                </select>
+            </div>
+
+            <!-- Timeframe -->
+            <div class="form-group">
+                <label>Timeframe</label>
+                <div class="btn-group">
+                    <button class="time-btn active" data-time="5">5m</button>
+                    <button class="time-btn" data-time="15">15m</button>
+                    <button class="time-btn" data-time="60">1h</button>
+                </div>
+            </div>
+
+            <!-- Get Signal Button -->
+            <button class="signal-btn" id="signalBtn">Get Signal</button>
+
+            <!-- Result Box -->
+            <div class="result-box" id="resultBox" style="display: none;">
+                <div class="result-icon" id="resultIcon">⚠️</div>
+                <div class="result-text" id="resultText">Server error.</div>
+                <div class="result-subtext">Please try again in a few seconds.</div>
+            </div>
+
+            <!-- Chart -->
+            <div class="chart-box">
+                <div class="chart-header">
+                    <span class="chart-title" id="chartTitle">🪙 Bitcoin / TetherUS</span>
+                    <span class="chart-status">🟢</span>
+                </div>
+                <div class="chart-price" id="chartPrice">Loading...</div>
+                <!-- TradingView Widget Container -->
+                <div id="tradingview_chart"></div>
+            </div>
+        </div>
+
+        <!-- Subscription Modal -->
+        <div class="modal" id="subscriptionModal">
+            <div class="modal-backdrop" onclick="closeModal()"></div>
+            <div class="modal-box">
+                <button class="modal-close" onclick="closeModal()">✕</button>
+
+                <!-- Step 1: Choose Plan -->
+                <div id="planStep">
+                    <h2>🔒 Subscribe to Continue</h2>
+                    <p class="modal-desc">You've used all <strong>2 free attempts</strong>!</p>
+                    <p class="modal-desc">Choose your plan:</p>
+
+                    <div class="plans">
+                        <div class="plan">
+                            <div class="plan-name">Basic</div>
+                            <div class="plan-price">$14.99<span>/month</span></div>
+                            <div class="plan-features">
+                                ✓ 3 coins<br>
+                                ✓ Unlimited signals<br>
+                                ✓ All timeframes
+                            </div>
+                            <button class="plan-btn" onclick="selectPlan('basic', 14.99)">Subscribe</button>
+                        </div>
+
+                        <div class="plan featured">
+                            <div class="plan-badge">🔥 Popular</div>
+                            <div class="plan-name">Pro</div>
+                            <div class="plan-price">$24.99<span>/month</span></div>
+                            <div class="plan-features">
+                                ✓ 7 coins<br>
+                                ✓ Unlimited signals<br>
+                                ✓ Priority support
+                            </div>
+                            <button class="plan-btn" onclick="selectPlan('pro', 24.99)">Subscribe</button>
+                        </div>
+
+                        <div class="plan">
+                            <div class="plan-name">Premium</div>
+                            <div class="plan-price">$49.99<span>/month</span></div>
+                            <div class="plan-features">
+                                ✓ All 15 coins<br>
+                                ✓ Unlimited signals<br>
+                                ✓ VIP support
+                            </div>
+                            <button class="plan-btn" onclick="selectPlan('premium', 49.99)">Subscribe</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2: Payment Info (Hidden initially) -->
+                <div id="paymentStep" style="display: none;">
+                    <h2>💳 Payment</h2>
+                    <p class="modal-desc">
+                        Send <strong id="paymentAmount">$0.00</strong> USDT (TRC20) to:
+                    </p>
+
+                    <!-- QR Code -->
+                    <div style="text-align: center; margin: 20px 0;">
+                        <img id="qrCode"
+                             src=""
+                             alt="QR Code"
+                             style="width: 200px; height: 200px; border-radius: 12px; background: white; padding: 10px;">
+                    </div>
+
+                    <!-- Wallet Address -->
+                    <div class="chart-box" style="margin-bottom: 20px;">
+                        <div style="padding: 16px;">
+                            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">
+                                USDT TRC20 Address:
+                            </div>
+                            <div id="walletAddress"
+                                 style="font-family: monospace; font-size: 13px; word-break: break-all; color: var(--yellow); margin-bottom: 12px;">
+                                TECGFKQd1SuJdVihGnegeVGfEXKnpCWieY
+                            </div>
+                            <button class="plan-btn" onclick="copyAddress()" style="padding: 10px;">
+                                📋 Copy Address
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Payment Instructions -->
+                    <div class="result-box" style="margin-bottom: 16px;">
+                        <div class="result-subtext" style="text-align: left; line-height: 1.8;">
+                            ⚠️ Important:<br>
+                            • Send only USDT (TRC20)<br>
+                            • Network: TRON (TRC20)<br>
+                            • After payment, click "I Paid"<br>
+                            • Activation within 1-5 minutes
+                        </div>
+                    </div>
+
+                    <!-- Already Paid Button -->
+                    <button class="signal-btn" onclick="checkPayment()" style="margin: 0;">
+                        ✅ I Already Paid
+                    </button>
+
+                    <button class="nav-btn" onclick="backToPlans()" style="margin-top: 12px; width: 100%;">
+                        ← Back to Plans
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- About Content (Hidden by default) -->
+        <div class="content" id="aboutContent" style="display: none;">
+            <div class="result-box">
+                <div class="result-icon">📊</div>
+                <div class="result-text">Alpina Signal</div>
+                <div class="result-subtext" style="margin-bottom: 20px;">AI-powered cryptocurrency trading signals</div>
+            </div>
+
+            <div class="chart-box">
+                <div style="padding: 20px; text-align: center;">
+                    <h3 style="margin-bottom: 16px; color: var(--yellow);">Features</h3>
+                    <div style="text-align: left; line-height: 2;">
+                        ✅ Real-time AI analysis<br>
+                        ✅ Neural network predictions<br>
+                        ✅ Multiple timeframes (5m, 15m, 1h)<br>
+                        ✅ 15 cryptocurrency pairs<br>
+                        ✅ High accuracy signals<br>
+                        ✅ Risk management<br>
+                    </div>
+                    <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border);">
+                        <p style="color: var(--text-muted); font-size: 14px;">
+                            Powered by advanced Transformer and LSTM neural networks trained on 3 years of historical data.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Overlay -->
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="spinner"></div>
+            <p>Loading signal...</p>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
