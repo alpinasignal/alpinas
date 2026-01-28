@@ -17,6 +17,8 @@ let selectedCoin = 'BTCUSDT';
 let userId = tg.initDataUnsafe?.user?.id || 123456789;
 let tvWidget = null;
 let tvChart = null;  // Store chart reference
+let signalHistory = [];  // Store signal history
+let currentPrice = 0;  // Current price for SL/TP calculation
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -30,6 +32,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // Initialize app
 function initializeApp() {
     updateAttemptsDisplay();
+    loadSignalHistory();
 }
 
 // Load user info from Telegram
@@ -115,33 +118,61 @@ function initializeTradingView() {
 
 // Update TradingView chart
 function updateTradingViewChart() {
-    if (!tvChart) {
-        console.log('Chart not ready yet, waiting...');
-        // Try again after a short delay
-        setTimeout(() => {
-            if (tvWidget) {
-                tvChart = tvWidget.activeChart();
-                if (tvChart) {
-                    updateTradingViewChart();
-                }
+    console.log(`Attempting to update chart: ${selectedCoin}, timeframe: ${currentTimeframe}`);
+
+    // Recreate widget with new symbol
+    if (tvWidget) {
+        try {
+            // Remove old widget
+            tvWidget.remove();
+        } catch (e) {
+            console.log('Error removing widget:', e);
+        }
+    }
+
+    // Wait a bit before creating new widget
+    setTimeout(() => {
+        tvWidget = new TradingView.widget({
+            container_id: 'tradingview_chart',
+            width: '100%',
+            height: 300,
+            symbol: `BINANCE:${selectedCoin}`,
+            interval: currentTimeframe,
+            timezone: 'Etc/UTC',
+            theme: 'dark',
+            style: '1',
+            locale: 'en',
+            toolbar_bg: '#16181d',
+            enable_publishing: false,
+            hide_top_toolbar: false,
+            hide_legend: true,
+            save_image: false,
+            backgroundColor: '#16181d',
+            gridColor: '#2a2d35',
+            studies: [],
+            disabled_features: [
+                'header_widget',
+                'timeframes_toolbar',
+                'volume_force_overlay',
+                'create_volume_indicator_by_default'
+            ],
+            enabled_features: [],
+            overrides: {
+                'mainSeriesProperties.candleStyle.upColor': '#00e676',
+                'mainSeriesProperties.candleStyle.downColor': '#ff5252',
+                'mainSeriesProperties.candleStyle.borderUpColor': '#00e676',
+                'mainSeriesProperties.candleStyle.borderDownColor': '#ff5252',
+                'mainSeriesProperties.candleStyle.wickUpColor': '#00e676',
+                'mainSeriesProperties.candleStyle.wickDownColor': '#ff5252'
             }
-        }, 500);
-        return;
-    }
-
-    try {
-        // Update symbol
-        tvChart.setSymbol(`BINANCE:${selectedCoin}`, () => {
-            console.log(`Chart symbol updated to ${selectedCoin}`);
         });
 
-        // Update resolution (timeframe)
-        tvChart.setResolution(currentTimeframe, () => {
-            console.log(`Chart timeframe updated to ${currentTimeframe}m`);
+        // Store chart reference when widget is ready
+        tvWidget.onChartReady(() => {
+            tvChart = tvWidget.activeChart();
+            console.log(`TradingView chart updated to ${selectedCoin}`);
         });
-    } catch (error) {
-        console.error('Error updating TradingView chart:', error);
-    }
+    }, 100);
 }
 
 // Update price display
@@ -152,6 +183,7 @@ async function updatePriceDisplay() {
 
         if (data.price) {
             const price = parseFloat(data.price);
+            currentPrice = price;  // Store for SL/TP calculation
 
             // Format price based on value
             let formattedPrice;
@@ -247,6 +279,9 @@ async function handleGetSignal() {
         return;
     }
 
+    // Update price first
+    await updatePriceDisplay();
+
     // Show loading
     showLoading();
 
@@ -263,13 +298,46 @@ async function handleGetSignal() {
 
         const randomSignal = signals[Math.floor(Math.random() * signals.length)];
 
+        // Calculate SL/TP based on signal type
+        let stopLoss = 0;
+        let takeProfit = 0;
+        const entryPrice = currentPrice;
+
+        if (randomSignal.signal === 'LONG') {
+            // LONG: SL below, TP above
+            stopLoss = entryPrice * 0.98;  // 2% below
+            takeProfit = entryPrice * 1.04;  // 4% above (Risk:Reward 1:2)
+        } else if (randomSignal.signal === 'SHORT') {
+            // SHORT: SL above, TP below
+            stopLoss = entryPrice * 1.02;  // 2% above
+            takeProfit = entryPrice * 0.96;  // 4% below
+        }
+
+        // Add SL/TP to signal data
+        const signalData = {
+            ...randomSignal,
+            entryPrice,
+            stopLoss,
+            takeProfit,
+            coin: selectedCoin,
+            timeframe: currentTimeframe + 'm',
+            timestamp: new Date().toISOString(),
+            timestampFormatted: new Date().toLocaleString()
+        };
+
+        // Save to history
+        if (randomSignal.signal !== 'NO TRADE') {
+            signalHistory.unshift(signalData);
+            localStorage.setItem('alpina_signal_history', JSON.stringify(signalHistory));
+        }
+
         // Increment attempts
         attemptsUsed++;
         saveAttempts();
         updateAttemptsDisplay();
 
         // Show result
-        showSignalResult(randomSignal);
+        showSignalResult(signalData);
 
         // Haptic feedback
         if (tg.HapticFeedback) {
@@ -290,6 +358,8 @@ function showSignalResult(data) {
     const resultBox = document.getElementById('resultBox');
     const resultIcon = document.getElementById('resultIcon');
     const resultText = document.getElementById('resultText');
+    const resultSubtext = document.getElementById('resultSubtext');
+    const slTpBox = document.getElementById('slTpBox');
 
     resultBox.classList.remove('success', 'error');
 
@@ -297,19 +367,48 @@ function showSignalResult(data) {
         resultBox.classList.add('success');
         resultIcon.textContent = '📈';
         resultText.textContent = `LONG Signal (${(data.confidence * 100).toFixed(1)}%)`;
+        resultSubtext.textContent = `Open LONG position on ${data.coin}`;
+
+        // Show SL/TP
+        slTpBox.style.display = 'block';
+        document.getElementById('entryPrice').textContent = `$${formatPrice(data.entryPrice)}`;
+        document.getElementById('stopLoss').textContent = `$${formatPrice(data.stopLoss)}`;
+        document.getElementById('takeProfit').textContent = `$${formatPrice(data.takeProfit)}`;
+
     } else if (data.signal === 'SHORT') {
         resultBox.classList.add('error');
         resultIcon.textContent = '📉';
         resultText.textContent = `SHORT Signal (${(data.confidence * 100).toFixed(1)}%)`;
+        resultSubtext.textContent = `Open SHORT position on ${data.coin}`;
+
+        // Show SL/TP
+        slTpBox.style.display = 'block';
+        document.getElementById('entryPrice').textContent = `$${formatPrice(data.entryPrice)}`;
+        document.getElementById('stopLoss').textContent = `$${formatPrice(data.stopLoss)}`;
+        document.getElementById('takeProfit').textContent = `$${formatPrice(data.takeProfit)}`;
+
     } else {
         resultIcon.textContent = '⚠️';
         resultText.textContent = 'NO TRADE - Wait for better setup';
+        resultSubtext.textContent = 'Market conditions are not favorable';
+        slTpBox.style.display = 'none';
     }
 
     resultBox.style.display = 'block';
 
     // Update price
     updatePriceDisplay();
+}
+
+// Format price helper
+function formatPrice(price) {
+    if (price >= 1000) {
+        return price.toFixed(2);
+    } else if (price >= 1) {
+        return price.toFixed(4);
+    } else {
+        return price.toFixed(6);
+    }
 }
 
 // Show error result
@@ -526,15 +625,109 @@ function hideLoading() {
     document.getElementById('loadingOverlay').classList.remove('show');
 }
 
+// Load signal history from localStorage
+function loadSignalHistory() {
+    const stored = localStorage.getItem('alpina_signal_history');
+    if (stored) {
+        signalHistory = JSON.parse(stored);
+    }
+    updateHistoryDisplay();
+}
+
+// Update history display
+function updateHistoryDisplay() {
+    const historyList = document.getElementById('historyList');
+    const emptyHistory = document.getElementById('emptyHistory');
+    const historyCount = document.getElementById('historyCount');
+
+    if (signalHistory.length === 0) {
+        emptyHistory.style.display = 'block';
+        historyList.style.display = 'none';
+        historyCount.textContent = '0 signals';
+        return;
+    }
+
+    emptyHistory.style.display = 'none';
+    historyList.style.display = 'flex';
+    historyCount.textContent = `${signalHistory.length} signals`;
+
+    // Clear existing items
+    historyList.innerHTML = '';
+
+    // Add history items
+    signalHistory.forEach((signal, index) => {
+        const item = document.createElement('div');
+        item.className = 'chart-box';
+        item.style.padding = '16px';
+        item.style.marginBottom = index === signalHistory.length - 1 ? '0' : '0';
+
+        const signalClass = signal.signal === 'LONG' ? 'success' : 'error';
+        const signalIcon = signal.signal === 'LONG' ? '📈' : '📉';
+        const signalColor = signal.signal === 'LONG' ? 'var(--success)' : 'var(--error)';
+
+        item.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                <div>
+                    <div style="font-size: 16px; font-weight: 600; color: ${signalColor}; margin-bottom: 4px;">
+                        ${signalIcon} ${signal.signal}
+                    </div>
+                    <div style="font-size: 13px; color: var(--text-muted);">
+                        ${signal.coin} • ${signal.timeframe}
+                    </div>
+                </div>
+                <div style="text-align: right;">
+                    <div style="font-size: 12px; color: var(--text-muted);">
+                        ${signal.timestampFormatted}
+                    </div>
+                    <div style="font-size: 13px; color: var(--yellow); margin-top: 4px;">
+                        ${(signal.confidence * 100).toFixed(1)}% confidence
+                    </div>
+                </div>
+            </div>
+            <div style="display: flex; justify-content: space-between; padding-top: 12px; border-top: 1px solid var(--border); font-size: 12px;">
+                <div>
+                    <div style="color: var(--text-muted); margin-bottom: 4px;">Entry</div>
+                    <div style="color: var(--yellow); font-weight: 600;">$${formatPrice(signal.entryPrice)}</div>
+                </div>
+                <div>
+                    <div style="color: var(--text-muted); margin-bottom: 4px;">Stop Loss</div>
+                    <div style="color: var(--error); font-weight: 600;">$${formatPrice(signal.stopLoss)}</div>
+                </div>
+                <div>
+                    <div style="color: var(--text-muted); margin-bottom: 4px;">Take Profit</div>
+                    <div style="color: var(--success); font-weight: 600;">$${formatPrice(signal.takeProfit)}</div>
+                </div>
+            </div>
+        `;
+
+        historyList.appendChild(item);
+    });
+}
+
 // Tab navigation functions
 function showSignalsTab() {
     // Update active button
     document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
     event.target.classList.add('active');
 
-    // Show signals content, hide about
+    // Show signals content, hide others
     document.getElementById('signalsContent').style.display = 'block';
+    document.getElementById('historyContent').style.display = 'none';
     document.getElementById('aboutContent').style.display = 'none';
+}
+
+function showHistoryTab() {
+    // Update active button
+    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+
+    // Show history content, hide others
+    document.getElementById('signalsContent').style.display = 'none';
+    document.getElementById('historyContent').style.display = 'block';
+    document.getElementById('aboutContent').style.display = 'none';
+
+    // Refresh history display
+    updateHistoryDisplay();
 }
 
 function showAboutTab() {
@@ -542,8 +735,9 @@ function showAboutTab() {
     document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
     event.target.classList.add('active');
 
-    // Show about content, hide signals
+    // Show about content, hide others
     document.getElementById('signalsContent').style.display = 'none';
+    document.getElementById('historyContent').style.display = 'none';
     document.getElementById('aboutContent').style.display = 'block';
 }
 
@@ -556,5 +750,6 @@ window.copyAddress = copyAddress;
 window.checkPayment = checkPayment;
 window.backToPlans = backToPlans;
 window.showSignalsTab = showSignalsTab;
+window.showHistoryTab = showHistoryTab;
 window.showAboutTab = showAboutTab;
 window.showSubscriptionModal = showSubscriptionModal;

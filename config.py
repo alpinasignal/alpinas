@@ -56,19 +56,20 @@ ATR_PERIOD = 14
 # NEURAL NETWORK
 # ========================
 
-# Model architecture - ENHANCED FOR BETTER ACCURACY
+# Model architecture - MAXIMUM ACCURACY CONFIGURATION
 MODEL_TYPE = "transformer"  # "transformer" or "lstm"
-HIDDEN_DIM = 512  # Increased from 256 for more capacity
-NUM_LAYERS = 8  # Increased from 4 for deeper learning
-NUM_HEADS = 16  # Increased from 8 for better attention
-DROPOUT = 0.25  # Slightly increased for better regularization
+HIDDEN_DIM = 768  # Further increased for maximum capacity (3x original)
+NUM_LAYERS = 10  # Deeper architecture for complex pattern learning
+NUM_HEADS = 24  # More attention heads for better feature extraction (must divide HIDDEN_DIM)
+DROPOUT = 0.3  # Enhanced regularization to prevent overfitting
 
-# Training configuration
-BATCH_SIZE = 64
-LEARNING_RATE = 0.0001
-MAX_EPOCHS = 100
-EARLY_STOPPING_PATIENCE = 10
+# Training configuration - Optimized for larger model
+BATCH_SIZE = 48  # Slightly reduced for larger model (memory optimization)
+LEARNING_RATE = 0.00005  # Lower learning rate for better convergence with larger model
+MAX_EPOCHS = 150  # More epochs for better training
+EARLY_STOPPING_PATIENCE = 15  # More patience for complex model
 VALIDATION_SPLIT = 0.15
+LABEL_SMOOTHING = 0.1  # Label smoothing for better generalization
 
 # Walk-forward validation
 TRAIN_TEST_SPLIT = 0.80  # 80% train, 20% test
@@ -86,15 +87,15 @@ LABEL_LOOKAHEAD = 10
 # INFERENCE & SIGNAL GENERATION
 # ========================
 
-# Probability thresholds for signals
-LONG_THRESHOLD = 0.60
-SHORT_THRESHOLD = 0.60
+# Probability thresholds for signals - Stricter for higher accuracy
+LONG_THRESHOLD = 0.70  # Increased from 0.60 for more confident signals
+SHORT_THRESHOLD = 0.70  # Increased from 0.60 for more confident signals
 
 # Volatility filter (percentile)
-MAX_VOLATILITY_PERCENTILE = 95
+MAX_VOLATILITY_PERCENTILE = 90  # Slightly stricter to avoid extreme volatility
 
 # Minimum confidence to show (for UI)
-MIN_DISPLAY_CONFIDENCE = 50
+MIN_DISPLAY_CONFIDENCE = 60  # Higher threshold for display
 
 # ========================
 # SUBSCRIPTION TIERS

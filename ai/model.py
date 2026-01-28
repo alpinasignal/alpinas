@@ -47,6 +47,35 @@ class PositionalEncoding(nn.Module):
         return self.dropout(x)
 
 
+class AttentionPooling(nn.Module):
+    """
+    Learnable attention-based pooling
+    Better than mean pooling for capturing important temporal features
+    """
+    def __init__(self, hidden_dim: int):
+        super().__init__()
+        self.attention = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.Tanh(),
+            nn.Linear(hidden_dim // 2, 1)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: [batch, seq_len, hidden_dim]
+        Returns:
+            pooled: [batch, hidden_dim]
+        """
+        # Calculate attention weights
+        attn_weights = self.attention(x)  # [batch, seq_len, 1]
+        attn_weights = torch.softmax(attn_weights, dim=1)  # [batch, seq_len, 1]
+
+        # Weighted sum
+        pooled = torch.sum(x * attn_weights, dim=1)  # [batch, hidden_dim]
+        return pooled
+
+
 class TransformerPredictor(nn.Module):
     """
     Transformer-based model for crypto price prediction
@@ -55,8 +84,8 @@ class TransformerPredictor(nn.Module):
     1. Input projection layer
     2. Positional encoding
     3. Transformer encoder layers
-    4. Global average pooling
-    5. Classification head
+    4. Attention-based pooling (learnable)
+    5. Advanced classification head with residual connections
 
     Output: 3-class probability distribution [NO TRADE, LONG, SHORT]
     """
@@ -104,21 +133,30 @@ class TransformerPredictor(nn.Module):
             norm=nn.LayerNorm(hidden_dim)
         )
 
-        # Enhanced classification head with deeper architecture
-        self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.LayerNorm(hidden_dim // 2),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, hidden_dim // 4),
-            nn.GELU(),
-            nn.Dropout(dropout / 2),  # Less dropout in final layers
-            nn.Linear(hidden_dim // 4, num_classes)
-        )
+        # Attention-based pooling instead of simple mean
+        self.attention_pool = AttentionPooling(hidden_dim)
+
+        # Maximum accuracy classification head with residual connections
+        self.classifier_layer1 = nn.Linear(hidden_dim, hidden_dim)
+        self.norm1 = nn.LayerNorm(hidden_dim)
+        self.dropout1 = nn.Dropout(dropout)
+
+        self.classifier_layer2 = nn.Linear(hidden_dim, hidden_dim)
+        self.norm2 = nn.LayerNorm(hidden_dim)
+        self.dropout2 = nn.Dropout(dropout)
+
+        self.classifier_layer3 = nn.Linear(hidden_dim, hidden_dim // 2)
+        self.norm3 = nn.LayerNorm(hidden_dim // 2)
+        self.dropout3 = nn.Dropout(dropout)
+
+        self.classifier_layer4 = nn.Linear(hidden_dim // 2, hidden_dim // 4)
+        self.norm4 = nn.LayerNorm(hidden_dim // 4)
+        self.dropout4 = nn.Dropout(dropout / 2)
+
+        self.classifier_output = nn.Linear(hidden_dim // 4, num_classes)
+
+        # Residual projection for skip connection
+        self.residual_proj = nn.Linear(hidden_dim, hidden_dim)
 
         # Initialize weights
         self._init_weights()
@@ -133,7 +171,7 @@ class TransformerPredictor(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass
+        Forward pass with attention pooling and residual connections
 
         Args:
             x: [batch, seq_len, num_features]
@@ -150,11 +188,42 @@ class TransformerPredictor(nn.Module):
         # Transformer encoding
         x = self.transformer_encoder(x)  # [batch, seq_len, hidden_dim]
 
-        # Global average pooling over sequence dimension
-        x = x.mean(dim=1)  # [batch, hidden_dim]
+        # Attention-based pooling (learnable)
+        x = self.attention_pool(x)  # [batch, hidden_dim]
 
-        # Classification
-        logits = self.classifier(x)  # [batch, num_classes]
+        # Store for residual connection
+        identity = x
+
+        # Classification with residual connections
+        # Layer 1 with residual
+        x = self.classifier_layer1(x)
+        x = self.norm1(x)
+        x = nn.functional.gelu(x)
+        x = self.dropout1(x)
+        x = x + self.residual_proj(identity)  # Residual connection
+
+        # Layer 2 with residual
+        identity2 = x
+        x = self.classifier_layer2(x)
+        x = self.norm2(x)
+        x = nn.functional.gelu(x)
+        x = self.dropout2(x)
+        x = x + identity2  # Residual connection
+
+        # Layer 3
+        x = self.classifier_layer3(x)
+        x = self.norm3(x)
+        x = nn.functional.gelu(x)
+        x = self.dropout3(x)
+
+        # Layer 4
+        x = self.classifier_layer4(x)
+        x = self.norm4(x)
+        x = nn.functional.gelu(x)
+        x = self.dropout4(x)
+
+        # Output layer
+        logits = self.classifier_output(x)  # [batch, num_classes]
 
         return logits
 
@@ -176,7 +245,7 @@ class TransformerPredictor(nn.Module):
 class LSTMPredictor(nn.Module):
     """
     Alternative LSTM-based model
-    More stable than Transformer for some datasets
+    Enhanced with attention pooling and residual connections
     """
 
     def __init__(
@@ -203,22 +272,28 @@ class LSTMPredictor(nn.Module):
             bidirectional=True  # Bidirectional for better context
         )
 
-        # Enhanced classification head for LSTM
+        # Attention pooling for LSTM output
+        self.attention_pool = AttentionPooling(hidden_dim * 2)  # *2 for bidirectional
+
+        # Maximum accuracy classification head with residual connections
         # *2 because bidirectional
-        self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim * 2),
-            nn.LayerNorm(hidden_dim * 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim * 2, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout / 2),
-            nn.Linear(hidden_dim // 2, num_classes)
-        )
+        self.classifier_layer1 = nn.Linear(hidden_dim * 2, hidden_dim * 2)
+        self.norm1 = nn.LayerNorm(hidden_dim * 2)
+        self.dropout1 = nn.Dropout(dropout)
+
+        self.classifier_layer2 = nn.Linear(hidden_dim * 2, hidden_dim * 2)
+        self.norm2 = nn.LayerNorm(hidden_dim * 2)
+        self.dropout2 = nn.Dropout(dropout)
+
+        self.classifier_layer3 = nn.Linear(hidden_dim * 2, hidden_dim)
+        self.norm3 = nn.LayerNorm(hidden_dim)
+        self.dropout3 = nn.Dropout(dropout)
+
+        self.classifier_layer4 = nn.Linear(hidden_dim, hidden_dim // 2)
+        self.norm4 = nn.LayerNorm(hidden_dim // 2)
+        self.dropout4 = nn.Dropout(dropout / 2)
+
+        self.classifier_output = nn.Linear(hidden_dim // 2, num_classes)
 
         # Initialize weights
         self._init_weights()
@@ -239,7 +314,7 @@ class LSTMPredictor(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass
+        Forward pass with attention pooling and residual connections
 
         Args:
             x: [batch, seq_len, num_features]
@@ -250,11 +325,42 @@ class LSTMPredictor(nn.Module):
         # LSTM encoding
         lstm_out, (hidden, cell) = self.lstm(x)  # lstm_out: [batch, seq_len, hidden*2]
 
-        # Take last time step
-        last_output = lstm_out[:, -1, :]  # [batch, hidden*2]
+        # Attention-based pooling instead of just last timestep
+        x = self.attention_pool(lstm_out)  # [batch, hidden*2]
 
-        # Classification
-        logits = self.classifier(last_output)  # [batch, num_classes]
+        # Store for residual connection
+        identity = x
+
+        # Classification with residual connections
+        # Layer 1 with residual
+        x = self.classifier_layer1(x)
+        x = self.norm1(x)
+        x = nn.functional.relu(x)
+        x = self.dropout1(x)
+        x = x + identity  # Residual connection
+
+        # Layer 2 with residual
+        identity2 = x
+        x = self.classifier_layer2(x)
+        x = self.norm2(x)
+        x = nn.functional.relu(x)
+        x = self.dropout2(x)
+        x = x + identity2  # Residual connection
+
+        # Layer 3
+        x = self.classifier_layer3(x)
+        x = self.norm3(x)
+        x = nn.functional.relu(x)
+        x = self.dropout3(x)
+
+        # Layer 4
+        x = self.classifier_layer4(x)
+        x = self.norm4(x)
+        x = nn.functional.relu(x)
+        x = self.dropout4(x)
+
+        # Output layer
+        logits = self.classifier_output(x)  # [batch, num_classes]
 
         return logits
 

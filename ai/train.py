@@ -85,11 +85,14 @@ class Trainer:
         self.device = device
         self.learning_rate = learning_rate
 
-        # Loss function with class weights
+        # Loss function with class weights and label smoothing
         if class_weights is not None:
             class_weights = class_weights.to(device)
 
-        self.criterion = nn.CrossEntropyLoss(weight=class_weights)
+        self.criterion = nn.CrossEntropyLoss(
+            weight=class_weights,
+            label_smoothing=config.LABEL_SMOOTHING  # Improved generalization
+        )
 
         # Optimizer with weight decay for regularization
         self.optimizer = optim.AdamW(
