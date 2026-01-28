@@ -145,13 +145,8 @@ def start_api_server():
 
     logger.info("Starting API server...")
 
-    uvicorn.run(
-        app,
-        host=config.API_HOST,
-        port=config.API_PORT,
-        log_level="info"
-    )
-
+    port = int(os.environ.get("API_PORT", os.environ.get("PORT", 8000)))
+    uvicorn.run(app, host="0.0.0.0", port=port)
 
 def start_telegram_bot():
     """Start Telegram bot"""
