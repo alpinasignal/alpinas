@@ -87,13 +87,51 @@ class DatabaseManager:
     """Manages database connections and operations"""
 
     def __init__(self, database_url: str = config.DATABASE_URL):
-        self.engine = create_engine(database_url)
-        Base.metadata.create_all(self.engine)
-        self.SessionLocal = sessionmaker(bind=self.engine)
+        self.database_url = database_url
+        self.engine = None
+        self.SessionLocal = None
+        self._initialized = False
 
-    def get_session(self) -> Session:
+    def _initialize(self):
+        """Lazy initialization of database connection"""
+        if self._initialized:
+            return
+
+        try:
+            # Add connect_args for IPv4-only and connection pooling
+            connect_args = {
+                'connect_timeout': 10,
+                'options': '-c search_path=public'
+            }
+
+            self.engine = create_engine(
+                self.database_url,
+                connect_args=connect_args,
+                pool_pre_ping=True,  # Verify connections before using
+                pool_size=5,
+                max_overflow=10
+            )
+
+            # Try to create tables
+            Base.metadata.create_all(self.engine)
+            self.SessionLocal = sessionmaker(bind=self.engine)
+            self._initialized = True
+            logger.info("Database initialized successfully")
+
+        except Exception as e:
+            logger.error(f"Database initialization failed: {e}")
+            logger.warning("Running in fallback mode without database")
+            # Set fallback mode - app will still work without DB
+            self._initialized = False
+
+    def get_session(self) -> Optional[Session]:
         """Get database session"""
-        return self.SessionLocal()
+        if not self._initialized:
+            self._initialize()
+
+        if self._initialized and self.SessionLocal:
+            return self.SessionLocal()
+        return None
 
 
 # ========================
@@ -106,14 +144,22 @@ class SubscriptionManager:
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
 
+    def is_admin(self, telegram_id: int) -> bool:
+        """Check if user is admin"""
+        return telegram_id in config.ADMIN_IDS
+
     def create_user(
         self,
         telegram_id: int,
         username: Optional[str] = None,
         first_name: Optional[str] = None
-    ) -> User:
+    ) -> Optional[User]:
         """Create new user with free subscription"""
         session = self.db.get_session()
+
+        if not session:
+            logger.warning(f"No database session, skipping user creation for {telegram_id}")
+            return None
 
         try:
             # Check if user exists
@@ -141,8 +187,12 @@ class SubscriptionManager:
             logger.info(f"Created new user: {telegram_id}")
             return user
 
+        except Exception as e:
+            logger.error(f"Error creating user: {e}")
+            return None
         finally:
-            session.close()
+            if session:
+                session.close()
 
     def _create_free_subscription(self, session: Session, user_id: int):
         """Create free tier subscription"""
@@ -163,6 +213,9 @@ class SubscriptionManager:
         """Get active subscription for user"""
         session = self.db.get_session()
 
+        if not session:
+            return None
+
         try:
             subscription = session.query(Subscription).filter(
                 Subscription.user_id == user_id,
@@ -171,11 +224,16 @@ class SubscriptionManager:
 
             return subscription
 
+        except Exception as e:
+            logger.error(f"Error getting subscription: {e}")
+            return None
         finally:
-            session.close()
+            if session:
+                session.close()
 
     def can_access_symbol(
         self,
+        telegram_id: int,
         user_id: int,
         symbol: str
     ) -> bool:
@@ -183,16 +241,22 @@ class SubscriptionManager:
         Check if user can access a symbol based on subscription
 
         Args:
-            user_id: User ID
+            telegram_id: Telegram user ID (for admin check)
+            user_id: Database user ID
             symbol: Trading pair
 
         Returns:
             True if user has access
         """
+        # Check if admin - unlimited access
+        if self.is_admin(telegram_id):
+            return True
+
         subscription = self.get_subscription(user_id)
 
         if not subscription:
-            return False
+            # If no database, allow limited access
+            return True
 
         # Check if subscription expired
         if subscription.expires_at and subscription.expires_at < datetime.utcnow():
@@ -363,6 +427,9 @@ class SubscriptionManager:
         """Get user's prediction history"""
         session = self.db.get_session()
 
+        if not session:
+            return []
+
         try:
             history = session.query(PredictionHistory).filter(
                 PredictionHistory.user_id == user_id
@@ -370,8 +437,89 @@ class SubscriptionManager:
 
             return history
 
+        except Exception as e:
+            logger.error(f"Error getting prediction history: {e}")
+            return []
         finally:
-            session.close()
+            if session:
+                session.close()
+
+    # ========================
+    # ADMIN FUNCTIONS
+    # ========================
+
+    def get_user_stats(self, telegram_id: int) -> Optional[dict]:
+        """
+        Get user statistics (admin only)
+
+        Returns:
+            Dictionary with user stats or None
+        """
+        if not self.is_admin(telegram_id):
+            logger.warning(f"Non-admin {telegram_id} tried to access user stats")
+            return None
+
+        session = self.db.get_session()
+
+        if not session:
+            return {"error": "Database not available"}
+
+        try:
+            # Total users
+            total_users = session.query(User).count()
+
+            # Active users (last 7 days)
+            week_ago = datetime.utcnow() - timedelta(days=7)
+            active_users = session.query(User).filter(
+                User.last_active >= week_ago
+            ).count()
+
+            # Users by subscription tier
+            tier_counts = {}
+            for tier in ["free", "basic", "pro", "premium"]:
+                count = session.query(Subscription).filter(
+                    Subscription.tier == tier,
+                    Subscription.is_active == True
+                ).count()
+                tier_counts[tier] = count
+
+            # Total predictions
+            total_predictions = session.query(PredictionHistory).count()
+
+            # Recent users (last 10)
+            recent_users = session.query(User).order_by(
+                User.created_at.desc()
+            ).limit(10).all()
+
+            recent_list = []
+            for user in recent_users:
+                subscription = session.query(Subscription).filter(
+                    Subscription.user_id == user.id,
+                    Subscription.is_active == True
+                ).first()
+
+                recent_list.append({
+                    "telegram_id": user.telegram_id,
+                    "username": user.username or "No username",
+                    "first_name": user.first_name or "No name",
+                    "created_at": user.created_at.strftime("%Y-%m-%d %H:%M"),
+                    "tier": subscription.tier if subscription else "none"
+                })
+
+            return {
+                "total_users": total_users,
+                "active_users_7d": active_users,
+                "tier_counts": tier_counts,
+                "total_predictions": total_predictions,
+                "recent_users": recent_list
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting user stats: {e}")
+            return {"error": str(e)}
+        finally:
+            if session:
+                session.close()
 
 
 if __name__ == "__main__":

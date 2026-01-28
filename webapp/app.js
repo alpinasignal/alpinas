@@ -4,6 +4,7 @@
 // Configuration
 const API_BASE_URL = 'http://localhost:8000/api/v1';
 const FREE_ATTEMPTS_LIMIT = 2;
+const ADMIN_IDS = [7940666073];  // Admin Telegram IDs
 
 // Telegram Web App
 const tg = window.Telegram?.WebApp || { expand: () => {}, ready: () => {}, initDataUnsafe: {} };
@@ -29,10 +30,22 @@ document.addEventListener('DOMContentLoaded', () => {
     loadUserInfo();
 });
 
+// Check if user is admin
+function isAdmin() {
+    return ADMIN_IDS.includes(userId);
+}
+
 // Initialize app
 function initializeApp() {
     updateAttemptsDisplay();
     loadSignalHistory();
+
+    // If admin, show unlimited access and admin button
+    if (isAdmin()) {
+        document.querySelector('.attempts-banner span').innerHTML = '👑 <strong>Admin Access - Unlimited</strong>';
+        document.getElementById('adminBtn').style.display = 'block';
+        console.log('Admin logged in');
+    }
 }
 
 // Load user info from Telegram
@@ -273,10 +286,13 @@ function updateAttemptsDisplay() {
 
 // Handle Get Signal button
 async function handleGetSignal() {
-    // Check if user has attempts left
-    if (attemptsUsed >= FREE_ATTEMPTS_LIMIT) {
-        showSubscriptionModal();
-        return;
+    // Skip limit check for admins
+    if (!isAdmin()) {
+        // Check if user has attempts left
+        if (attemptsUsed >= FREE_ATTEMPTS_LIMIT) {
+            showSubscriptionModal();
+            return;
+        }
     }
 
     // Update price first
@@ -331,10 +347,19 @@ async function handleGetSignal() {
             localStorage.setItem('alpina_signal_history', JSON.stringify(signalHistory));
         }
 
-        // Increment attempts
-        attemptsUsed++;
-        saveAttempts();
-        updateAttemptsDisplay();
+        // Increment attempts (only for non-admins)
+        if (!isAdmin()) {
+            attemptsUsed++;
+            saveAttempts();
+            updateAttemptsDisplay();
+
+            // If this was the last free attempt, show modal after a delay
+            if (attemptsUsed >= FREE_ATTEMPTS_LIMIT) {
+                setTimeout(() => {
+                    showSubscriptionModal();
+                }, 3000);
+            }
+        }
 
         // Show result
         showSignalResult(signalData);
@@ -342,13 +367,6 @@ async function handleGetSignal() {
         // Haptic feedback
         if (tg.HapticFeedback) {
             tg.HapticFeedback.notificationOccurred('success');
-        }
-
-        // If this was the last free attempt, show modal after a delay
-        if (attemptsUsed >= FREE_ATTEMPTS_LIMIT) {
-            setTimeout(() => {
-                showSubscriptionModal();
-            }, 3000);
         }
     }, 2000);
 }
@@ -741,6 +759,108 @@ function showAboutTab() {
     document.getElementById('aboutContent').style.display = 'block';
 }
 
+// Admin Panel Functions
+function showAdminTab() {
+    if (!isAdmin()) {
+        alert('Access denied. Admin only.');
+        return;
+    }
+
+    // Update active button
+    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+    event.target.classList.add('active');
+
+    // Show admin content, hide others
+    document.getElementById('signalsContent').style.display = 'none';
+    document.getElementById('historyContent').style.display = 'none';
+    document.getElementById('aboutContent').style.display = 'none';
+    document.getElementById('adminContent').style.display = 'block';
+
+    // Load admin stats
+    loadAdminStats();
+}
+
+async function loadAdminStats() {
+    if (!isAdmin()) return;
+
+    showLoading();
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/admin/stats`, {
+            method: 'GET',
+            headers: {
+                'X-Telegram-User-ID': userId.toString()
+            }
+        });
+
+        const data = await response.json();
+        hideLoading();
+
+        if (data.error) {
+            alert('Error loading stats: ' + data.error);
+            return;
+        }
+
+        // Update overview stats
+        document.getElementById('adminTotalUsers').textContent = data.total_users || 0;
+        document.getElementById('adminActiveUsers').textContent = data.active_users_7d || 0;
+        document.getElementById('adminFree').textContent = data.tier_counts?.free || 0;
+        document.getElementById('adminBasic').textContent = data.tier_counts?.basic || 0;
+        document.getElementById('adminPro').textContent = data.tier_counts?.pro || 0;
+        document.getElementById('adminPremium').textContent = data.tier_counts?.premium || 0;
+
+        // Update recent users list
+        const recentList = document.getElementById('adminRecentList');
+        const emptyState = document.getElementById('adminEmpty');
+        const recentCount = document.getElementById('adminRecentCount');
+
+        if (data.recent_users && data.recent_users.length > 0) {
+            recentList.style.display = 'flex';
+            emptyState.style.display = 'none';
+            recentCount.textContent = `${data.recent_users.length} users`;
+
+            recentList.innerHTML = '';
+
+            data.recent_users.forEach(user => {
+                const tierColor = {
+                    'free': 'var(--text-muted)',
+                    'basic': 'var(--yellow)',
+                    'pro': 'var(--success)',
+                    'premium': 'var(--error)'
+                };
+
+                const item = document.createElement('div');
+                item.style.cssText = 'padding: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;';
+                item.innerHTML = `
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                        <div>
+                            <div style="font-size: 14px; font-weight: 600;">${user.first_name}</div>
+                            <div style="font-size: 12px; color: var(--text-muted);">@${user.username}</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <div style="font-size: 11px; color: ${tierColor[user.tier]}; font-weight: 700; text-transform: uppercase;">${user.tier}</div>
+                            <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">${user.created_at}</div>
+                        </div>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-muted);">
+                        Telegram ID: ${user.telegram_id}
+                    </div>
+                `;
+                recentList.appendChild(item);
+            });
+        } else {
+            recentList.style.display = 'none';
+            emptyState.style.display = 'block';
+            recentCount.textContent = '0 users';
+        }
+
+    } catch (error) {
+        hideLoading();
+        console.error('Error loading admin stats:', error);
+        alert('Failed to load admin statistics');
+    }
+}
+
 // Expose functions globally for onclick handlers
 window.openSupport = openSupport;
 window.closeModal = closeModal;
@@ -753,3 +873,5 @@ window.showSignalsTab = showSignalsTab;
 window.showHistoryTab = showHistoryTab;
 window.showAboutTab = showAboutTab;
 window.showSubscriptionModal = showSubscriptionModal;
+window.showAdminTab = showAdminTab;
+window.loadAdminStats = loadAdminStats;

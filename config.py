@@ -98,6 +98,13 @@ MAX_VOLATILITY_PERCENTILE = 90  # Slightly stricter to avoid extreme volatility
 MIN_DISPLAY_CONFIDENCE = 60  # Higher threshold for display
 
 # ========================
+# ADMIN CONFIGURATION
+# ========================
+
+# Admin Telegram IDs (unlimited access, can view stats)
+ADMIN_IDS = [7940666073]  # Add your admin Telegram IDs here
+
+# ========================
 # SUBSCRIPTION TIERS
 # ========================
 

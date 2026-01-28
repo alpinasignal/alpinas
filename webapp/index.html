@@ -31,6 +31,7 @@
             <button class="nav-btn" onclick="showHistoryTab()">History</button>
             <button class="nav-btn" onclick="showAboutTab()">About</button>
             <button class="nav-btn" onclick="showSubscriptionModal()">Subscribe</button>
+            <button class="nav-btn" id="adminBtn" style="display: none;" onclick="showAdminTab()">👑 Admin</button>
         </nav>
 
         <!-- Free Attempts Banner -->
@@ -282,6 +283,70 @@
                             <strong style="color: var(--yellow);">70%+ confidence threshold</strong> ensures only high-quality signals
                         </p>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Admin Panel (Hidden by default) -->
+        <div class="content" id="adminContent" style="display: none;">
+            <div class="result-box" style="text-align: center;">
+                <div class="result-icon">👑</div>
+                <div class="result-text">Admin Panel</div>
+                <div class="result-subtext" style="margin-bottom: 20px;">System Statistics & User Management</div>
+            </div>
+
+            <!-- Stats Overview -->
+            <div class="chart-box" style="margin-bottom: 16px;">
+                <div class="chart-header">
+                    <span class="chart-title">📊 Overview</span>
+                    <button class="time-btn" onclick="loadAdminStats()" style="padding: 6px 12px; font-size: 12px;">🔄 Refresh</button>
+                </div>
+                <div style="padding: 16px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+                        <div style="text-align: center;">
+                            <div style="font-size: 24px; font-weight: 700; color: var(--yellow);" id="adminTotalUsers">0</div>
+                            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Total Users</div>
+                        </div>
+                        <div style="text-align: center;">
+                            <div style="font-size: 24px; font-weight: 700; color: var(--success);" id="adminActiveUsers">0</div>
+                            <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Active (7d)</div>
+                        </div>
+                    </div>
+                    <div style="border-top: 1px solid var(--border); padding-top: 12px;">
+                        <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">Subscriptions by Tier:</div>
+                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center;">
+                            <div>
+                                <div style="font-size: 16px; font-weight: 600;" id="adminFree">0</div>
+                                <div style="font-size: 10px; color: var(--text-muted);">Free</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 16px; font-weight: 600;" id="adminBasic">0</div>
+                                <div style="font-size: 10px; color: var(--text-muted);">Basic</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 16px; font-weight: 600;" id="adminPro">0</div>
+                                <div style="font-size: 10px; color: var(--text-muted);">Pro</div>
+                            </div>
+                            <div>
+                                <div style="font-size: 16px; font-weight: 600;" id="adminPremium">0</div>
+                                <div style="font-size: 10px; color: var(--text-muted);">Premium</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Users -->
+            <div class="chart-box">
+                <div class="chart-header">
+                    <span class="chart-title">👥 Recent Users</span>
+                    <span class="chart-status" id="adminRecentCount">0 users</span>
+                </div>
+                <div id="adminRecentList" style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+                    <!-- Recent users will be added here -->
+                </div>
+                <div id="adminEmpty" style="text-align: center; padding: 20px; color: var(--text-muted);">
+                    No user data available
                 </div>
             </div>
         </div>
