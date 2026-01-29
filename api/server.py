@@ -21,6 +21,9 @@ from ai.predict import load_model_and_predict
 from ai.model_store import ModelStore
 from data.market import BinanceDataFetcher
 
+# Import subscription management
+from payments.subscriptions import DatabaseManager, SubscriptionManager
+
 # Initialize FastAPI app
 app = FastAPI(
     title=config.API_TITLE,
@@ -42,6 +45,10 @@ model_store = ModelStore()
 
 # Cache for loaded models (to avoid reloading)
 loaded_models = {}
+
+# Initialize database manager (lazy initialization)
+db_manager = DatabaseManager()
+subscription_manager = SubscriptionManager(db_manager)
 
 
 # ========================
@@ -364,6 +371,45 @@ async def get_prediction_history(user_id: int, limit: int = 50):
 # ========================
 # STARTUP / SHUTDOWN
 # ========================
+
+@app.get("/api/v1/admin/stats")
+async def get_admin_stats(
+    x_telegram_user_id: Optional[int] = Header(None, alias="X-Telegram-User-ID")
+):
+    """
+    Get admin statistics (admin only)
+
+    Returns:
+        User statistics, subscription counts, recent users
+    """
+    if x_telegram_user_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Telegram User ID header required"
+        )
+
+    # Check if user is admin
+    if not subscription_manager.is_admin(x_telegram_user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Admin access required"
+        )
+
+    try:
+        stats = subscription_manager.get_user_stats(x_telegram_user_id)
+
+        if stats is None:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied"
+            )
+
+        return stats
+
+    except Exception as e:
+        logger.error(f"Error getting admin stats: {e}")
+        return {"error": str(e)}
+
 
 @app.post("/api/v1/verify-payment")
 async def verify_payment(
