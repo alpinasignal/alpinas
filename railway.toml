@@ -5,4 +5,4 @@ builder = "nixpacks"
 startCommand = "python main.py"
 restartPolicyType = "on_failure"
 healthcheckPath = "/"
-healthcheckTimeout = 30
+healthcheckTimeout = 100

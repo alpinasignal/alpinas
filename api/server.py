@@ -122,12 +122,19 @@ async def check_subscription(
 @app.get("/")
 async def root():
     """Health check endpoint"""
+    logger.info("Health check request received")
     return {
         "service": "Alpina Signal API",
         "status": "online",
         "version": config.API_VERSION,
         "timestamp": datetime.utcnow().isoformat()
     }
+
+
+@app.get("/health")
+async def health():
+    """Alternative health check endpoint"""
+    return {"status": "ok"}
 
 
 @app.get("/api/v1/supported-pairs")
