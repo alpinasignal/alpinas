@@ -11,30 +11,37 @@ const ADMIN_IDS = [7940666073];  // Admin Telegram IDs
 
 // Telegram Web App
 const tg = window.Telegram?.WebApp || { expand: () => {}, ready: () => {}, initDataUnsafe: {} };
-tg.expand();
-tg.ready();
-
-console.log('API Base URL:', API_BASE_URL);
-console.log('Telegram WebApp initialized:', tg);
-console.log('Telegram User Data:', tg.initDataUnsafe);
 
 // State
 let attemptsUsed = 0;
 let currentTimeframe = '5';
 let selectedCoin = 'BTCUSDT';
-let userId = tg.initDataUnsafe?.user?.id || 123456789;
+let userId = 123456789;  // Will be set in loadUserInfo()
 let tvWidget = null;
 let tvChart = null;  // Store chart reference
 let signalHistory = [];  // Store signal history
 let currentPrice = 0;  // Current price for SL/TP calculation
 
-// Initialize
+// Wait for Telegram WebApp to be ready
+console.log('Waiting for Telegram WebApp...');
+tg.ready();
+tg.expand();
+
+// Initialize after DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM loaded');
+    console.log('API Base URL:', API_BASE_URL);
+    console.log('Telegram WebApp:', tg);
+    console.log('Telegram initDataUnsafe:', tg.initDataUnsafe);
+
+    // Load user info FIRST (sets userId)
+    loadUserInfo();
+
+    // Then initialize app
     initializeApp();
     setupEventListeners();
     loadAttempts();
     initializeTradingView();
-    loadUserInfo();
 });
 
 // Check if user is admin
@@ -57,41 +64,64 @@ function initializeApp() {
 
 // Load user info from Telegram
 function loadUserInfo() {
-    const telegramUser = tg.initDataUnsafe?.user;
-
     const usernameEl = document.getElementById('username');
     const userIdEl = document.getElementById('userId');
 
     console.log('Loading user info...');
-    console.log('Telegram User Object:', telegramUser);
-    console.log('Full initDataUnsafe:', tg.initDataUnsafe);
+    console.log('Telegram WebApp object:', tg);
+    console.log('initDataUnsafe:', tg.initDataUnsafe);
 
+    // Try to get user data immediately
+    let telegramUser = tg.initDataUnsafe?.user;
+
+    // If no user data yet, wait and retry (Telegram WebApp might still be loading)
+    if (!telegramUser || !telegramUser.id) {
+        console.log('User data not ready yet, retrying in 500ms...');
+        setTimeout(() => {
+            telegramUser = tg.initDataUnsafe?.user;
+            console.log('Retry - Telegram User:', telegramUser);
+            applyUserInfo(telegramUser, usernameEl, userIdEl);
+        }, 500);
+    } else {
+        applyUserInfo(telegramUser, usernameEl, userIdEl);
+    }
+}
+
+// Helper function to apply user info to DOM
+function applyUserInfo(telegramUser, usernameEl, userIdEl) {
     if (telegramUser && telegramUser.id) {
         // Update username
         if (telegramUser.username) {
             usernameEl.textContent = `@${telegramUser.username}`;
-            console.log('Username set:', telegramUser.username);
+            console.log('✅ Username set:', telegramUser.username);
         } else if (telegramUser.first_name) {
             usernameEl.textContent = telegramUser.first_name;
-            console.log('First name set:', telegramUser.first_name);
+            console.log('✅ First name set:', telegramUser.first_name);
         } else {
             usernameEl.textContent = `User ${telegramUser.id}`;
-            console.log('Generic user name set');
+            console.log('✅ Generic user name set');
         }
 
         // Update user ID
         userIdEl.textContent = telegramUser.id;
         userId = telegramUser.id;
-        console.log('User ID set:', userId);
+        console.log('✅ User ID set:', userId);
+
+        // Check if admin
+        if (isAdmin()) {
+            document.querySelector('.attempts-banner span').innerHTML = '👑 <strong>Admin Access - Unlimited</strong>';
+            document.getElementById('adminBtn').style.display = 'block';
+            console.log('👑 Admin logged in');
+        }
     } else {
         // Fallback for testing outside Telegram
-        console.warn('No Telegram user data available - using demo mode');
+        console.warn('⚠️ No Telegram user data - using demo mode');
         usernameEl.textContent = 'Demo User';
         userIdEl.textContent = '123456789';
         userId = 123456789;
     }
 
-    // Force immediate display update
+    // Force display update
     usernameEl.style.display = 'block';
     userIdEl.style.display = 'inline';
 }
@@ -322,6 +352,13 @@ async function handleGetSignal() {
     showLoading();
 
     try {
+        console.log('Calling AI API:', {
+            url: `${API_BASE_URL}/predict`,
+            symbol: selectedCoin,
+            timeframe: currentTimeframe + 'm',
+            user_id: userId
+        });
+
         // Call REAL AI prediction API
         const response = await fetch(`${API_BASE_URL}/predict`, {
             method: 'POST',
@@ -336,12 +373,23 @@ async function handleGetSignal() {
             })
         });
 
+        console.log('API Response status:', response.status);
+
         if (!response.ok) {
-            throw new Error(`API Error: ${response.status}`);
+            const errorText = await response.text();
+            console.error('API Error:', errorText);
+
+            // If model not found (404), use demo mode
+            if (response.status === 404) {
+                console.warn('Model not found - using demo mode');
+                throw new Error('DEMO_MODE');
+            }
+
+            throw new Error(`API Error: ${response.status} - ${errorText}`);
         }
 
         const prediction = await response.json();
-        console.log('AI Prediction:', prediction);
+        console.log('AI Prediction received:', prediction);
 
         hideLoading();
 
@@ -405,11 +453,85 @@ async function handleGetSignal() {
     } catch (error) {
         console.error('Error getting signal:', error);
         hideLoading();
-        showErrorResult();
 
-        // Haptic feedback for error
-        if (tg.HapticFeedback) {
-            tg.HapticFeedback.notificationOccurred('error');
+        // If DEMO_MODE (no models yet), use mock data
+        if (error.message === 'DEMO_MODE') {
+            console.warn('Using demo prediction (models not trained yet)');
+
+            // Generate mock prediction for demo
+            const mockSignals = [
+                { signal: 'LONG', confidence: 0.78 },
+                { signal: 'SHORT', confidence: 0.72 },
+                { signal: 'NO TRADE', confidence: 0.55 }
+            ];
+
+            const mockPrediction = mockSignals[Math.floor(Math.random() * mockSignals.length)];
+
+            // Calculate SL/TP
+            let stopLoss = 0;
+            let takeProfit = 0;
+            const entryPrice = currentPrice;
+
+            if (mockPrediction.signal === 'LONG') {
+                stopLoss = entryPrice * 0.98;
+                takeProfit = entryPrice * 1.04;
+            } else if (mockPrediction.signal === 'SHORT') {
+                stopLoss = entryPrice * 1.02;
+                takeProfit = entryPrice * 0.96;
+            }
+
+            const signalData = {
+                signal: mockPrediction.signal,
+                confidence: mockPrediction.confidence,
+                entryPrice,
+                stopLoss,
+                takeProfit,
+                coin: selectedCoin,
+                timeframe: currentTimeframe + 'm',
+                timestamp: new Date().toISOString(),
+                timestampFormatted: new Date().toLocaleString(),
+                reason: 'Demo mode - models not trained yet'
+            };
+
+            // Save to history
+            if (mockPrediction.signal !== 'NO TRADE') {
+                signalHistory.unshift(signalData);
+                localStorage.setItem('alpina_signal_history', JSON.stringify(signalHistory));
+            }
+
+            // Increment attempts (only for non-admins)
+            if (!isAdmin()) {
+                attemptsUsed++;
+                saveAttempts();
+                updateAttemptsDisplay();
+
+                if (attemptsUsed >= FREE_ATTEMPTS_LIMIT) {
+                    setTimeout(() => {
+                        showSubscriptionModal();
+                    }, 3000);
+                }
+            }
+
+            // Show result
+            showSignalResult(signalData);
+
+            // Show demo warning
+            setTimeout(() => {
+                alert('⚠️ Demo Mode\n\nAI models are being trained.\nShowing demo predictions for now.');
+            }, 1000);
+
+            if (tg.HapticFeedback) {
+                tg.HapticFeedback.notificationOccurred('success');
+            }
+
+        } else {
+            // Real error - show error message
+            showErrorResult();
+
+            // Haptic feedback for error
+            if (tg.HapticFeedback) {
+                tg.HapticFeedback.notificationOccurred('error');
+            }
         }
     }
 }
@@ -473,15 +595,19 @@ function formatPrice(price) {
 }
 
 // Show error result
-function showErrorResult() {
+function showErrorResult(message = 'Connection error. Please check your internet and try again.') {
     const resultBox = document.getElementById('resultBox');
     const resultIcon = document.getElementById('resultIcon');
     const resultText = document.getElementById('resultText');
+    const resultSubtext = document.getElementById('resultSubtext');
+    const slTpBox = document.getElementById('slTpBox');
 
     resultBox.classList.remove('success');
     resultBox.classList.add('error');
     resultIcon.textContent = '⚠️';
-    resultText.textContent = 'Server error. Please try again.';
+    resultText.textContent = 'Error';
+    resultSubtext.textContent = message;
+    slTpBox.style.display = 'none';
     resultBox.style.display = 'block';
 }
 
