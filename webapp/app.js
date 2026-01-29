@@ -2,7 +2,10 @@
 // Professional Yellow/Black Design with TradingView Integration
 
 // Configuration
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+// Dynamic API URL - works on both localhost and Railway
+const API_BASE_URL = window.location.hostname === 'localhost'
+    ? 'http://localhost:8000/api/v1'
+    : `${window.location.origin}/api/v1`;
 const FREE_ATTEMPTS_LIMIT = 2;
 const ADMIN_IDS = [7940666073];  // Admin Telegram IDs
 
@@ -10,6 +13,10 @@ const ADMIN_IDS = [7940666073];  // Admin Telegram IDs
 const tg = window.Telegram?.WebApp || { expand: () => {}, ready: () => {}, initDataUnsafe: {} };
 tg.expand();
 tg.ready();
+
+console.log('API Base URL:', API_BASE_URL);
+console.log('Telegram WebApp initialized:', tg);
+console.log('Telegram User Data:', tg.initDataUnsafe);
 
 // State
 let attemptsUsed = 0;
@@ -55,25 +62,38 @@ function loadUserInfo() {
     const usernameEl = document.getElementById('username');
     const userIdEl = document.getElementById('userId');
 
+    console.log('Loading user info...');
+    console.log('Telegram User Object:', telegramUser);
+    console.log('Full initDataUnsafe:', tg.initDataUnsafe);
+
     if (telegramUser && telegramUser.id) {
         // Update username
         if (telegramUser.username) {
             usernameEl.textContent = `@${telegramUser.username}`;
+            console.log('Username set:', telegramUser.username);
         } else if (telegramUser.first_name) {
             usernameEl.textContent = telegramUser.first_name;
+            console.log('First name set:', telegramUser.first_name);
         } else {
             usernameEl.textContent = `User ${telegramUser.id}`;
+            console.log('Generic user name set');
         }
 
         // Update user ID
         userIdEl.textContent = telegramUser.id;
         userId = telegramUser.id;
+        console.log('User ID set:', userId);
     } else {
         // Fallback for testing outside Telegram
+        console.warn('No Telegram user data available - using demo mode');
         usernameEl.textContent = 'Demo User';
         userIdEl.textContent = '123456789';
         userId = 123456789;
     }
+
+    // Force immediate display update
+    usernameEl.style.display = 'block';
+    userIdEl.style.display = 'inline';
 }
 
 // Initialize TradingView Widget
@@ -301,29 +321,40 @@ async function handleGetSignal() {
     // Show loading
     showLoading();
 
-    // Simulate signal generation (mock data for now)
-    setTimeout(() => {
+    try {
+        // Call REAL AI prediction API
+        const response = await fetch(`${API_BASE_URL}/predict`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'user-id': userId.toString()
+            },
+            body: JSON.stringify({
+                symbol: selectedCoin,
+                timeframe: currentTimeframe + 'm',
+                user_id: userId
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`API Error: ${response.status}`);
+        }
+
+        const prediction = await response.json();
+        console.log('AI Prediction:', prediction);
+
         hideLoading();
-
-        // Mock signal data
-        const signals = [
-            { signal: 'LONG', confidence: 0.73 },
-            { signal: 'SHORT', confidence: 0.68 },
-            { signal: 'NO TRADE', confidence: 0.45 }
-        ];
-
-        const randomSignal = signals[Math.floor(Math.random() * signals.length)];
 
         // Calculate SL/TP based on signal type
         let stopLoss = 0;
         let takeProfit = 0;
-        const entryPrice = currentPrice;
+        const entryPrice = prediction.price || currentPrice;
 
-        if (randomSignal.signal === 'LONG') {
+        if (prediction.signal === 'LONG') {
             // LONG: SL below, TP above
             stopLoss = entryPrice * 0.98;  // 2% below
             takeProfit = entryPrice * 1.04;  // 4% above (Risk:Reward 1:2)
-        } else if (randomSignal.signal === 'SHORT') {
+        } else if (prediction.signal === 'SHORT') {
             // SHORT: SL above, TP below
             stopLoss = entryPrice * 1.02;  // 2% above
             takeProfit = entryPrice * 0.96;  // 4% below
@@ -331,18 +362,20 @@ async function handleGetSignal() {
 
         // Add SL/TP to signal data
         const signalData = {
-            ...randomSignal,
+            signal: prediction.signal,
+            confidence: prediction.confidence,
             entryPrice,
             stopLoss,
             takeProfit,
             coin: selectedCoin,
             timeframe: currentTimeframe + 'm',
             timestamp: new Date().toISOString(),
-            timestampFormatted: new Date().toLocaleString()
+            timestampFormatted: new Date().toLocaleString(),
+            reason: prediction.reason || ''
         };
 
         // Save to history
-        if (randomSignal.signal !== 'NO TRADE') {
+        if (prediction.signal !== 'NO TRADE') {
             signalHistory.unshift(signalData);
             localStorage.setItem('alpina_signal_history', JSON.stringify(signalHistory));
         }
@@ -368,7 +401,17 @@ async function handleGetSignal() {
         if (tg.HapticFeedback) {
             tg.HapticFeedback.notificationOccurred('success');
         }
-    }, 2000);
+
+    } catch (error) {
+        console.error('Error getting signal:', error);
+        hideLoading();
+        showErrorResult();
+
+        // Haptic feedback for error
+        if (tg.HapticFeedback) {
+            tg.HapticFeedback.notificationOccurred('error');
+        }
+    }
 }
 
 // Show signal result

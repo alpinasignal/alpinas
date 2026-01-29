@@ -87,15 +87,15 @@ LABEL_LOOKAHEAD = 10
 # INFERENCE & SIGNAL GENERATION
 # ========================
 
-# Probability thresholds for signals - Stricter for higher accuracy
-LONG_THRESHOLD = 0.70  # Increased from 0.60 for more confident signals
-SHORT_THRESHOLD = 0.70  # Increased from 0.60 for more confident signals
+# Probability thresholds for signals - VERY STRICT for highest accuracy
+LONG_THRESHOLD = 0.75  # Only ultra-confident signals (75%+)
+SHORT_THRESHOLD = 0.75  # Only ultra-confident signals (75%+)
 
 # Volatility filter (percentile)
-MAX_VOLATILITY_PERCENTILE = 90  # Slightly stricter to avoid extreme volatility
+MAX_VOLATILITY_PERCENTILE = 85  # Stricter filter - avoid volatile markets
 
 # Minimum confidence to show (for UI)
-MIN_DISPLAY_CONFIDENCE = 60  # Higher threshold for display
+MIN_DISPLAY_CONFIDENCE = 65  # Higher threshold for display
 
 # ========================
 # ADMIN CONFIGURATION
@@ -105,6 +105,16 @@ MIN_DISPLAY_CONFIDENCE = 60  # Higher threshold for display
 ADMIN_IDS = [7940666073]  # Add your admin Telegram IDs here
 
 # ========================
+# PAYMENT CONFIGURATION
+# ========================
+
+# USDT TRC20 receiving wallet address
+PAYMENT_WALLET_ADDRESS = "TECGFKQd1SuJdVihGnegeVGfEXKnpCWieY"
+
+# Payment verification timeframe (hours)
+PAYMENT_VERIFICATION_TIMEFRAME = 24  # Check last 24 hours for payments
+
+# ========================
 # SUBSCRIPTION TIERS
 # ========================
 
@@ -112,24 +122,31 @@ SUBSCRIPTION_TIERS = {
     "free": {
         "predictions": 2,
         "price": 0,
-        "coins": []  # user can pick any 2
+        "coins": [],  # user can pick any 2
+        "telegram_alerts": False
     },
     "basic": {
         "predictions": 3,
         "price": 14.99,
-        "coins": 3
+        "coins": 3,
+        "telegram_alerts": False
     },
     "pro": {
         "predictions": 7,
         "price": 24.99,
-        "coins": 7
+        "coins": 7,
+        "telegram_alerts": True  # ✓ Telegram alerts for signals >70%
     },
     "premium": {
         "predictions": 15,
         "price": 49.99,
-        "coins": 15
+        "coins": 15,
+        "telegram_alerts": True  # ✓ Telegram alerts for signals >70%
     }
 }
+
+# Minimum confidence for Telegram alerts
+TELEGRAM_ALERT_MIN_CONFIDENCE = 0.70  # Only send alerts for 70%+ signals
 
 # ========================
 # API CONFIGURATION

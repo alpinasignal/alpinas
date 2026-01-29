@@ -184,15 +184,24 @@ async def send_subscription_activated(telegram_id: int, tier: str):
         return
 
     try:
+        # Check if this tier has Telegram alerts
+        tier_info = config.SUBSCRIPTION_TIERS.get(tier.lower(), {})
+        has_alerts = tier_info.get("telegram_alerts", False)
+
+        benefits = """<b>Benefits:</b>
+✓ Unlimited predictions
+✓ All timeframes
+✓ Priority support"""
+
+        if has_alerts:
+            benefits += "\n✓ 🔔 <b>Telegram alerts</b> for signals >70%"
+
         message = f"""
 🎉 <b>Subscription Activated!</b>
 
 Your <b>{tier.upper()}</b> subscription is now active.
 
-<b>Benefits:</b>
-✓ Unlimited predictions
-✓ All timeframes
-✓ Priority support
+{benefits}
 
 Thank you for choosing Alpina Signal!
 """
