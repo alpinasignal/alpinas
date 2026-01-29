@@ -27,11 +27,15 @@ def start_api_server():
     from api.server import app
 
     # Get port from environment (Railway provides PORT env var)
-    port = int(os.environ.get("API_PORT", os.environ.get("PORT", 8000)))
+    # Railway sets PORT, we need to read it correctly
+    port_str = os.environ.get("PORT") or os.environ.get("API_PORT") or "8000"
+    port = int(port_str)
     host = os.environ.get("API_HOST", "0.0.0.0")
 
+    # Log environment info
+    logger.info(f"PORT env var: {os.environ.get('PORT', 'NOT SET')}")
     logger.info(f"Starting Alpina Signal API on {host}:{port}")
-    logger.info(f"Environment: {'Production' if port != 8000 else 'Development'}")
+    logger.info(f"Environment: {'Production (Railway)' if os.environ.get('PORT') else 'Development (Local)'}")
     logger.info(f"Mini App URL: {config.MINI_APP_URL}")
     logger.info("Mode: Telegram Mini App (NO BOT POLLING)")
 
