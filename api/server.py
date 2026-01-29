@@ -6,6 +6,8 @@ All intelligence lives here - Mini App is just UI
 
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import sys
@@ -39,6 +41,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static files (Mini App UI)
+webapp_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "webapp")
+if os.path.exists(webapp_dir):
+    app.mount("/webapp", StaticFiles(directory=webapp_dir), name="webapp")
+    logger.info(f"Mounted webapp directory: {webapp_dir}")
+else:
+    logger.warning(f"Webapp directory not found: {webapp_dir}")
 
 # Initialize model store
 model_store = ModelStore()
@@ -121,20 +131,39 @@ async def check_subscription(
 
 @app.get("/")
 async def root():
-    """Health check endpoint"""
-    logger.info("Health check request received")
-    return {
-        "service": "Alpina Signal API",
-        "status": "online",
-        "version": config.API_VERSION,
-        "timestamp": datetime.utcnow().isoformat()
-    }
+    """Root endpoint - Serve Mini App or API info"""
+    # Check if request is from browser (for Mini App)
+    # If webapp exists, serve it, otherwise return API info
+    webapp_index = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "webapp", "index.html")
+    if os.path.exists(webapp_index):
+        return FileResponse(webapp_index)
+    else:
+        # Fallback to API info if webapp not found
+        logger.info("Health check request received (webapp not found)")
+        return {
+            "service": "Alpina Signal API",
+            "status": "online",
+            "version": config.API_VERSION,
+            "timestamp": datetime.utcnow().isoformat()
+        }
 
 
 @app.get("/health")
 async def health():
-    """Alternative health check endpoint"""
+    """Health check endpoint for Railway"""
     return {"status": "ok"}
+
+
+@app.get("/api")
+async def api_info():
+    """API information endpoint"""
+    return {
+        "service": "Alpina Signal API",
+        "status": "online",
+        "version": config.API_VERSION,
+        "timestamp": datetime.utcnow().isoformat(),
+        "docs": "/docs"
+    }
 
 
 @app.get("/api/v1/supported-pairs")
