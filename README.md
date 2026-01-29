@@ -35,6 +35,14 @@ Alpina Signal is a **serious quantitative ML system** that uses real neural netw
 
 ## Architecture
 
+**⚠️ IMPORTANT: This is a Telegram Mini App (WebApp), NOT a polling bot.**
+
+- ✅ FastAPI server runs 24/7
+- ✅ Mini App communicates via HTTP API
+- ✅ Bot token used ONLY for sending messages (optional)
+- ❌ NO bot polling (no getUpdates)
+- ❌ NO bot command handlers
+
 ```
 Binance Market Data (public API)
         ↓
@@ -48,9 +56,9 @@ Volatility Filter + Confidence Threshold
         ↓
 Signal Generation (LONG/SHORT/NO TRADE)
         ↓
-REST API Server
+REST API Server (FastAPI - NO POLLING)
         ↓
-Telegram Mini App (UI only)
+Telegram Mini App (WebApp UI only)
 ```
 
 ## Project Structure
@@ -173,27 +181,34 @@ Evaluates model performance on historical data with metrics:
 - Max drawdown
 - Per-signal-type performance
 
-### Start API Server
+### Start API Server (Production)
 
 ```bash
-python main.py api
+python main.py
 ```
 
-Starts FastAPI server on `http://localhost:8000`
+**This starts ONLY the FastAPI server (NO bot polling).**
+
+Server runs on `http://localhost:8000` (or Railway-provided PORT)
 
 API endpoints:
+- `GET /` - Health check
 - `POST /api/v1/predict` - Get prediction for symbol
 - `POST /api/v1/predict-batch` - Get multiple predictions
 - `GET /api/v1/market-status/{symbol}` - Get market status
 - `GET /api/v1/subscription/{user_id}` - Get subscription info
+- `GET /api/v1/admin/stats` - Admin statistics (requires auth)
 
-### Start Telegram Bot
+### ~~Start Telegram Bot~~ DEPRECATED
 
-```bash
-python main.py bot
-```
+⚠️ **Bot polling has been REMOVED in v2.0.**
 
-Starts the Telegram bot that handles user authentication and launches the Mini App.
+This is a Telegram Mini App (WebApp), not a polling bot.
+- `bot/bot.py` now contains ONLY utility functions
+- No `application.run_polling()`
+- No getUpdates conflicts
+
+For local testing of CLI commands (training, predictions, etc.), use separate scripts.
 
 ## Model Details
 
@@ -333,10 +348,12 @@ SHORT_THRESHOLD = 0.60
 - [x] Backtesting framework
 - [x] REST API server
 - [x] Subscription system
-- [x] Telegram bot
 - [x] Mini App UI
-- [ ] Payment integration (USDT TRC20)
-- [ ] Real-time prediction updates
+- [x] **Remove bot polling (v2.0)**
+- [x] **Database fallback mode**
+- [x] **Admin dashboard**
+- [ ] Payment integration (USDT TRC20 verification)
+- [ ] Real-time prediction updates (WebSocket)
 - [ ] Model retraining pipeline
 - [ ] Performance monitoring dashboard
 - [ ] A/B testing framework
