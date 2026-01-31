@@ -92,24 +92,32 @@ class ModelStore:
         Returns:
             Path to model file or None
         """
+        # First check metadata registry
         matching_models = [
             m for m in self.metadata["models"]
             if m["symbol"] == symbol and m["timeframe"] == timeframe
         ]
 
-        if not matching_models:
-            return None
+        if matching_models:
+            if version:
+                for model in matching_models:
+                    if model["version"] == version:
+                        return model["model_path"]
+                return None
+            else:
+                latest_model = max(matching_models, key=lambda x: x["created_at"])
+                return latest_model["model_path"]
 
-        if version:
-            # Find specific version
-            for model in matching_models:
-                if model["version"] == version:
-                    return model["model_path"]
-            return None
-        else:
-            # Return latest
-            latest_model = max(matching_models, key=lambda x: x["created_at"])
-            return latest_model["model_path"]
+        # Fallback: check disk for standard model filename
+        standard_path = os.path.join(
+            self.models_dir,
+            f"{symbol}_{timeframe}_{config.MODEL_TYPE}.pt"
+        )
+        if os.path.exists(standard_path):
+            logger.info(f"Found model on disk (not in registry): {standard_path}")
+            return standard_path
+
+        return None
 
     def list_models(
         self,
@@ -145,15 +153,32 @@ class ModelStore:
         """
         latest_models = {}
 
+        # Check metadata registry
         for model in self.metadata["models"]:
             key = (model["symbol"], model["timeframe"])
 
             if key not in latest_models:
                 latest_models[key] = model
             else:
-                # Compare timestamps
                 if model["created_at"] > latest_models[key]["created_at"]:
                     latest_models[key] = model
+
+        # Also scan disk for unregistered models
+        if os.path.exists(self.models_dir):
+            for filename in os.listdir(self.models_dir):
+                if filename.endswith(".pt"):
+                    parts = filename.replace(".pt", "").split("_")
+                    if len(parts) >= 3:
+                        symbol = parts[0]
+                        timeframe = parts[1]
+                        key = (symbol, timeframe)
+                        if key not in latest_models:
+                            latest_models[key] = {
+                                "symbol": symbol,
+                                "timeframe": timeframe,
+                                "model_path": os.path.join(self.models_dir, filename),
+                                "source": "disk"
+                            }
 
         return latest_models
 

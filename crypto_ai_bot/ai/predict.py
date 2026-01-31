@@ -146,12 +146,12 @@ class SignalGenerator:
 
         return {
             "signal": signal,
-            "signal_class": signal_class,
-            "confidence": round(confidence, 2),
+            "signal_class": int(signal_class),
+            "confidence": round(float(confidence), 2),
             "probabilities": {
-                "no_trade": round(prob_no_trade * 100, 2),
-                "long": round(prob_long * 100, 2),
-                "short": round(prob_short * 100, 2)
+                "no_trade": round(float(prob_no_trade * 100), 2),
+                "long": round(float(prob_long * 100), 2),
+                "short": round(float(prob_short * 100), 2)
             },
             "reason": reason
         }
@@ -211,7 +211,7 @@ class SignalGenerator:
             "probabilities": signal_info["probabilities"],
             "volatility": {
                 "regime": volatility_regime,
-                "percentile": round(volatility_percentile * 100, 2)
+                "percentile": round(float(volatility_percentile * 100), 2)
             },
             "price": float(current_price),
             "timestamp": timestamp.isoformat(),
