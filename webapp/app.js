@@ -480,8 +480,20 @@ async function handleGetSignal() {
         console.error('Error getting signal:', error);
         hideLoading();
 
-        // Show error message
-        showErrorResult('Failed to get signal. Please try again.');
+        // Show detailed error for debugging
+        let errorMsg = 'Failed to get signal. Please try again.';
+        if (error.message) {
+            if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+                errorMsg = 'Server is restarting. Please wait 1-2 minutes and try again.';
+            } else if (error.message.includes('404')) {
+                errorMsg = 'Model not found for this pair/timeframe.';
+            } else if (error.message.includes('500')) {
+                errorMsg = 'Server error during prediction. Try again later.';
+            } else if (error.message.includes('422')) {
+                errorMsg = 'Request validation error. Please reload the app.';
+            }
+        }
+        showErrorResult(errorMsg);
 
         if (tg.HapticFeedback) {
             tg.HapticFeedback.notificationOccurred('error');
