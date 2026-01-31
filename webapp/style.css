@@ -1,0 +1,505 @@
+/* Alpina Signal - Professional Design */
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+:root {
+    --bg: #0a0b0d;
+    --card-bg: #16181d;
+    --yellow: #ffc107;
+    --yellow-hover: #ffb300;
+    --text: #ffffff;
+    --text-muted: #6c757d;
+    --border: #2a2d35;
+    --success: #00e676;
+    --error: #ff5252;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 0;
+    overflow-x: hidden;
+}
+
+.app {
+    max-width: 500px;
+    margin: 0 auto;
+    min-height: 100vh;
+    background: var(--bg);
+}
+
+/* Header */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+}
+
+.user-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.avatar {
+    width: 44px;
+    height: 44px;
+    background: var(--card-bg);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+}
+
+.user-details {
+    display: flex;
+    flex-direction: column;
+}
+
+.username {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.user-id {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.support-btn {
+    width: 44px;
+    height: 44px;
+    background: var(--card-bg);
+    border: none;
+    border-radius: 50%;
+    font-size: 24px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.support-btn:active {
+    transform: scale(0.95);
+}
+
+/* Navigation */
+.nav {
+    display: flex;
+    justify-content: space-around;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    gap: 8px;
+}
+
+.nav-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 14px;
+    font-weight: 500;
+    padding: 8px 16px;
+    cursor: pointer;
+    border-radius: 8px;
+    transition: all 0.2s;
+    flex: 1;
+}
+
+.nav-btn.active {
+    color: var(--text);
+    background: var(--card-bg);
+}
+
+/* Attempts Banner */
+.attempts-banner {
+    padding: 12px 20px;
+    background: linear-gradient(90deg, rgba(255,193,7,0.15) 0%, rgba(255,193,7,0.05) 100%);
+    border-bottom: 1px solid rgba(255,193,7,0.2);
+    text-align: center;
+    font-size: 14px;
+}
+
+.attempts-banner strong {
+    color: var(--yellow);
+    font-weight: 700;
+}
+
+/* Content */
+.content {
+    padding: 20px;
+}
+
+/* Form Group */
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.select-input {
+    width: 100%;
+    padding: 14px 16px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1L6 6L11 1' stroke='%23ffc107' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 16px center;
+    transition: border-color 0.2s;
+}
+
+.select-input:focus {
+    outline: none;
+    border-color: var(--yellow);
+}
+
+/* Button Group */
+.btn-group {
+    display: flex;
+    gap: 12px;
+}
+
+.time-btn {
+    flex: 1;
+    padding: 12px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.time-btn.active {
+    background: var(--yellow);
+    color: #000;
+    border-color: var(--yellow);
+}
+
+.time-btn:hover:not(.active) {
+    border-color: var(--yellow);
+}
+
+/* Signal Button */
+.signal-btn {
+    width: 100%;
+    padding: 16px;
+    background: var(--yellow);
+    border: none;
+    border-radius: 12px;
+    color: #000;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    margin: 24px 0 20px;
+    transition: all 0.2s;
+}
+
+.signal-btn:hover {
+    background: var(--yellow-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 16px rgba(255, 193, 7, 0.3);
+}
+
+.signal-btn:active {
+    transform: translateY(0);
+}
+
+/* Result Box */
+.result-box {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.result-icon {
+    font-size: 32px;
+    margin-bottom: 12px;
+}
+
+.result-text {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.result-subtext {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.result-box.success .result-text {
+    color: var(--success);
+}
+
+.result-box.error .result-text {
+    color: var(--error);
+}
+
+/* Chart Box */
+.chart-box {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 20px;
+}
+
+.chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.chart-title {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.chart-status {
+    font-size: 12px;
+}
+
+.chart-price {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--success);
+    margin-bottom: 16px;
+}
+
+#tradingview_chart {
+    width: 100%;
+    height: 300px;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+/* Modal */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.modal.show {
+    display: flex;
+}
+
+.modal-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.85);
+}
+
+.modal-box {
+    position: relative;
+    background: var(--card-bg);
+    border-radius: 20px;
+    width: 90%;
+    max-width: 420px;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 24px;
+    z-index: 1001;
+    animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.modal-close {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    width: 32px;
+    height: 32px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 24px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+}
+
+.modal-box h2 {
+    font-size: 22px;
+    text-align: center;
+    margin-bottom: 12px;
+}
+
+.modal-desc {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+    margin-bottom: 8px;
+}
+
+.plans {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin-top: 24px;
+}
+
+.plan {
+    background: var(--bg);
+    border: 2px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    position: relative;
+    transition: all 0.2s;
+}
+
+.plan.featured {
+    border-color: var(--yellow);
+    background: linear-gradient(135deg, rgba(255,193,7,0.1) 0%, rgba(255,193,7,0.05) 100%);
+}
+
+.plan-badge {
+    position: absolute;
+    top: -12px;
+    right: 20px;
+    background: var(--yellow);
+    color: #000;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.plan-name {
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.plan-price {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--yellow);
+    margin-bottom: 16px;
+}
+
+.plan-price span {
+    font-size: 14px;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.plan-features {
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 2;
+    margin-bottom: 16px;
+}
+
+.plan-btn {
+    width: 100%;
+    padding: 14px;
+    background: var(--yellow);
+    border: none;
+    border-radius: 12px;
+    color: #000;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.plan-btn:hover {
+    background: var(--yellow-hover);
+}
+
+/* Loading Overlay */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.8);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 999;
+}
+
+.loading-overlay.show {
+    display: flex;
+}
+
+.spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid var(--border);
+    border-top-color: var(--yellow);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading-overlay p {
+    margin-top: 16px;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+    .content {
+        padding: 16px;
+    }
+
+    #tradingview_chart {
+        height: 250px;
+    }
+}
