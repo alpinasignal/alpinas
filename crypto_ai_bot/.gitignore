@@ -38,8 +38,8 @@ wheels/
 # VS Code
 .vscode/
 
-# Models (too large for git)
-models/*.pt
+# Models (kept in git for Railway deployment - ~22MB total)
+# models/*.pt
 models/*.pth
 models/*.ckpt
 
