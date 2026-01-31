@@ -14,13 +14,20 @@ const tg = window.Telegram?.WebApp || { expand: () => {}, ready: () => {}, initD
 
 // State
 let attemptsUsed = 0;
-let currentTimeframe = '5';
+let currentTimeframe = '15';
 let selectedCoin = 'BTCUSDT';
 let userId = 123456789;  // Will be set in loadUserInfo()
 let tvWidget = null;
 let tvChart = null;  // Store chart reference
 let signalHistory = [];  // Store signal history
 let currentPrice = 0;  // Current price for SL/TP calculation
+
+// Map TradingView intervals to API timeframes
+const TIMEFRAME_MAP = {
+    '15': '15m',
+    '60': '1h',
+    '240': '4h'
+};
 
 // Wait for Telegram WebApp to be ready
 console.log('Waiting for Telegram WebApp...');
@@ -376,11 +383,15 @@ async function handleGetSignal() {
     // Show loading
     showLoading();
 
+    // Map TradingView interval to API timeframe
+    const apiTimeframe = TIMEFRAME_MAP[currentTimeframe] || '15m';
+    const displayTimeframe = apiTimeframe;
+
     try {
         console.log('Calling AI API:', {
             url: `${API_BASE_URL}/predict`,
             symbol: selectedCoin,
-            timeframe: currentTimeframe + 'm',
+            timeframe: apiTimeframe,
             user_id: userId
         });
 
@@ -393,7 +404,7 @@ async function handleGetSignal() {
             },
             body: JSON.stringify({
                 symbol: selectedCoin,
-                timeframe: currentTimeframe + 'm',
+                timeframe: apiTimeframe,
                 user_id: userId
             })
         });
@@ -403,13 +414,6 @@ async function handleGetSignal() {
         if (!response.ok) {
             const errorText = await response.text();
             console.error('API Error:', errorText);
-
-            // If model not found (404), use demo mode
-            if (response.status === 404) {
-                console.warn('Model not found - using demo mode');
-                throw new Error('DEMO_MODE');
-            }
-
             throw new Error(`API Error: ${response.status} - ${errorText}`);
         }
 
@@ -424,24 +428,22 @@ async function handleGetSignal() {
         const entryPrice = prediction.price || currentPrice;
 
         if (prediction.signal === 'LONG') {
-            // LONG: SL below, TP above
-            stopLoss = entryPrice * 0.98;  // 2% below
-            takeProfit = entryPrice * 1.04;  // 4% above (Risk:Reward 1:2)
+            stopLoss = entryPrice * 0.98;
+            takeProfit = entryPrice * 1.04;
         } else if (prediction.signal === 'SHORT') {
-            // SHORT: SL above, TP below
-            stopLoss = entryPrice * 1.02;  // 2% above
-            takeProfit = entryPrice * 0.96;  // 4% below
+            stopLoss = entryPrice * 1.02;
+            takeProfit = entryPrice * 0.96;
         }
 
-        // Add SL/TP to signal data
+        // confidence from API is already a percentage (e.g. 39.06 = 39.06%)
         const signalData = {
             signal: prediction.signal,
-            confidence: prediction.confidence,
+            confidence: prediction.confidence / 100,  // Store as decimal for display
             entryPrice,
             stopLoss,
             takeProfit,
             coin: selectedCoin,
-            timeframe: currentTimeframe + 'm',
+            timeframe: displayTimeframe,
             timestamp: new Date().toISOString(),
             timestampFormatted: new Date().toLocaleString(),
             reason: prediction.reason || ''
@@ -459,7 +461,6 @@ async function handleGetSignal() {
             saveAttempts();
             updateAttemptsDisplay();
 
-            // If this was the last free attempt, show modal after a delay
             if (attemptsUsed >= FREE_ATTEMPTS_LIMIT) {
                 setTimeout(() => {
                     showSubscriptionModal();
@@ -479,84 +480,11 @@ async function handleGetSignal() {
         console.error('Error getting signal:', error);
         hideLoading();
 
-        // If DEMO_MODE (no models yet), use mock data
-        if (error.message === 'DEMO_MODE') {
-            console.warn('Using demo prediction (models not trained yet)');
+        // Show error message
+        showErrorResult('Failed to get signal. Please try again.');
 
-            // Generate mock prediction for demo
-            const mockSignals = [
-                { signal: 'LONG', confidence: 0.78 },
-                { signal: 'SHORT', confidence: 0.72 },
-                { signal: 'NO TRADE', confidence: 0.55 }
-            ];
-
-            const mockPrediction = mockSignals[Math.floor(Math.random() * mockSignals.length)];
-
-            // Calculate SL/TP
-            let stopLoss = 0;
-            let takeProfit = 0;
-            const entryPrice = currentPrice;
-
-            if (mockPrediction.signal === 'LONG') {
-                stopLoss = entryPrice * 0.98;
-                takeProfit = entryPrice * 1.04;
-            } else if (mockPrediction.signal === 'SHORT') {
-                stopLoss = entryPrice * 1.02;
-                takeProfit = entryPrice * 0.96;
-            }
-
-            const signalData = {
-                signal: mockPrediction.signal,
-                confidence: mockPrediction.confidence,
-                entryPrice,
-                stopLoss,
-                takeProfit,
-                coin: selectedCoin,
-                timeframe: currentTimeframe + 'm',
-                timestamp: new Date().toISOString(),
-                timestampFormatted: new Date().toLocaleString(),
-                reason: 'Demo mode - models not trained yet'
-            };
-
-            // Save to history
-            if (mockPrediction.signal !== 'NO TRADE') {
-                signalHistory.unshift(signalData);
-                localStorage.setItem('alpina_signal_history', JSON.stringify(signalHistory));
-            }
-
-            // Increment attempts (only for non-admins)
-            if (!isAdmin()) {
-                attemptsUsed++;
-                saveAttempts();
-                updateAttemptsDisplay();
-
-                if (attemptsUsed >= FREE_ATTEMPTS_LIMIT) {
-                    setTimeout(() => {
-                        showSubscriptionModal();
-                    }, 3000);
-                }
-            }
-
-            // Show result
-            showSignalResult(signalData);
-
-            // Show demo warning
-            setTimeout(() => {
-                alert('⚠️ Demo Mode\n\nAI models are being trained.\nShowing demo predictions for now.');
-            }, 1000);
-
-            if (tg.HapticFeedback) {
-                tg.HapticFeedback.notificationOccurred('success');
-            }
-
-        } else {
-            // Real error - show error message
-            showErrorResult();
-
-            // Haptic feedback for error
-            if (tg.HapticFeedback) {
-                tg.HapticFeedback.notificationOccurred('error');
-            }
+        if (tg.HapticFeedback) {
+            tg.HapticFeedback.notificationOccurred('error');
         }
     }
 }
