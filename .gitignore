@@ -20,8 +20,7 @@ env/
 *.db
 *.sqlite3
 
-# AI Models (too large for git)
-crypto_ai_bot/models/*.pt
+# AI Models (keep in git for Railway deployment - ~22MB total)
 
 # Logs
 logs/
