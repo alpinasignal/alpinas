@@ -44,7 +44,7 @@ BINANCE_FUTURES_URL = "https://fapi.binance.com"
 # ========================
 
 # Sequence length for neural network input
-SEQUENCE_LENGTH = 128  # 128 candles as context
+SEQUENCE_LENGTH = 32  # 32 candles as context (optimized for CPU)
 
 # Feature windows for rolling calculations
 VOLATILITY_WINDOWS = [10, 20, 50]
@@ -56,26 +56,26 @@ ATR_PERIOD = 14
 # NEURAL NETWORK
 # ========================
 
-# Model architecture - MAXIMUM ACCURACY CONFIGURATION
+# Model architecture - OPTIMIZED FOR CPU TRAINING
 MODEL_TYPE = "transformer"  # "transformer" or "lstm"
-HIDDEN_DIM = 768  # Further increased for maximum capacity (3x original)
-NUM_LAYERS = 10  # Deeper architecture for complex pattern learning
-NUM_HEADS = 24  # More attention heads for better feature extraction (must divide HIDDEN_DIM)
-DROPOUT = 0.3  # Enhanced regularization to prevent overfitting
+HIDDEN_DIM = 64  # Compact model for fast CPU training
+NUM_LAYERS = 2  # 2 layers - enough for pattern learning
+NUM_HEADS = 4  # 4 attention heads (must divide HIDDEN_DIM)
+DROPOUT = 0.2  # Moderate regularization
+NUM_CLASSES = 3  # NO TRADE, LONG, SHORT
 
-# Training configuration - Optimized for larger model
-BATCH_SIZE = 48  # Slightly reduced for larger model (memory optimization)
-LEARNING_RATE = 0.00005  # Lower learning rate for better convergence with larger model
-MAX_EPOCHS = 150  # More epochs for better training
-EARLY_STOPPING_PATIENCE = 15  # More patience for complex model
+# Training configuration - Fast CPU training
+BATCH_SIZE = 128  # Larger batches for faster training
+LEARNING_RATE = 0.001  # Higher LR for faster convergence
+MAX_EPOCHS = 30  # 30 epochs - enough with early stopping
+EARLY_STOPPING_PATIENCE = 7  # Stop early if no improvement
 VALIDATION_SPLIT = 0.15
 LABEL_SMOOTHING = 0.1  # Label smoothing for better generalization
 
 # Walk-forward validation
 TRAIN_TEST_SPLIT = 0.80  # 80% train, 20% test
 
-# Class labels
-NUM_CLASSES = 3  # UP, DOWN, FLAT
+# Class labels (defined above in neural network section)
 
 # Dynamic labeling thresholds (relative to ATR)
 LABEL_THRESHOLD_MULTIPLIER = 0.5  # 0.5 * ATR

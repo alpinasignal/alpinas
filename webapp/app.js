@@ -14,13 +14,20 @@ const tg = window.Telegram?.WebApp || { expand: () => {}, ready: () => {}, initD
 
 // State
 let attemptsUsed = 0;
-let currentTimeframe = '5';
+let currentTimeframe = '15';
 let selectedCoin = 'BTCUSDT';
 let userId = 123456789;  // Will be set in loadUserInfo()
 let tvWidget = null;
 let tvChart = null;  // Store chart reference
 let signalHistory = [];  // Store signal history
 let currentPrice = 0;  // Current price for SL/TP calculation
+
+// Map TradingView intervals to API timeframes
+const TIMEFRAME_MAP = {
+    '15': '15m',
+    '60': '1h',
+    '240': '4h'
+};
 
 // Wait for Telegram WebApp to be ready
 console.log('Waiting for Telegram WebApp...');
@@ -34,14 +41,17 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('Telegram WebApp:', tg);
     console.log('Telegram initDataUnsafe:', tg.initDataUnsafe);
 
-    // Load user info FIRST (sets userId)
+    // CRITICAL: Setup event listeners FIRST (before anything can crash)
+    try { setupEventListeners(); } catch(e) { console.error('setupEventListeners error:', e); }
+    try { initializeTradingView(); } catch(e) { console.error('initializeTradingView error:', e); }
+    try { loadAttempts(); } catch(e) { console.error('loadAttempts error:', e); }
+    try { loadSignalHistory(); } catch(e) { console.error('loadSignalHistory error:', e); }
+
+    // Load user info LAST (admin check may modify DOM)
     loadUserInfo();
 
-    // Then initialize app
-    initializeApp();
-    setupEventListeners();
-    loadAttempts();
-    initializeTradingView();
+    // Apply admin UI if already detected
+    applyAdminUI();
 });
 
 // Check if user is admin
@@ -49,16 +59,17 @@ function isAdmin() {
     return ADMIN_IDS.includes(userId);
 }
 
-// Initialize app
-function initializeApp() {
-    updateAttemptsDisplay();
-    loadSignalHistory();
-
-    // If admin, show unlimited access and admin button
-    if (isAdmin()) {
-        document.querySelector('.attempts-banner span').innerHTML = '👑 <strong>Admin Access - Unlimited</strong>';
-        document.getElementById('adminBtn').style.display = 'block';
-        console.log('Admin logged in');
+// Apply admin UI (safe to call multiple times)
+function applyAdminUI() {
+    if (!isAdmin()) return;
+    try {
+        const banner = document.querySelector('.attempts-banner span');
+        if (banner) banner.innerHTML = '👑 <strong>Admin Access - Unlimited</strong>';
+        const adminBtn = document.getElementById('adminBtn');
+        if (adminBtn) adminBtn.style.display = 'block';
+        console.log('Admin UI applied');
+    } catch(e) {
+        console.error('applyAdminUI error:', e);
     }
 }
 
@@ -107,12 +118,8 @@ function applyUserInfo(telegramUser, usernameEl, userIdEl) {
         userId = telegramUser.id;
         console.log('✅ User ID set:', userId);
 
-        // Check if admin
-        if (isAdmin()) {
-            document.querySelector('.attempts-banner span').innerHTML = '👑 <strong>Admin Access - Unlimited</strong>';
-            document.getElementById('adminBtn').style.display = 'block';
-            console.log('👑 Admin logged in');
-        }
+        // Apply admin UI if this user is admin
+        applyAdminUI();
     } else {
         // Fallback for testing outside Telegram
         console.warn('⚠️ No Telegram user data - using demo mode');
@@ -124,6 +131,29 @@ function applyUserInfo(telegramUser, usernameEl, userIdEl) {
     // Force display update
     usernameEl.style.display = 'block';
     userIdEl.style.display = 'inline';
+
+    // Register user in database (for admin panel stats)
+    registerUser(telegramUser);
+}
+
+// Register user in backend database
+async function registerUser(telegramUser) {
+    if (!telegramUser || !telegramUser.id) return;
+
+    try {
+        await fetch(`${API_BASE_URL}/register-user`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                telegram_id: telegramUser.id,
+                username: telegramUser.username || null,
+                first_name: telegramUser.first_name || null
+            })
+        });
+        console.log('User registered in DB');
+    } catch (e) {
+        console.warn('Failed to register user:', e);
+    }
 }
 
 // Initialize TradingView Widget
@@ -268,10 +298,10 @@ async function updatePriceDisplay() {
 
 // Setup event listeners
 function setupEventListeners() {
-    // Timeframe buttons
-    document.querySelectorAll('.time-btn').forEach(btn => {
+    // Timeframe buttons (only within signals content, not admin panel)
+    document.querySelectorAll('#signalsContent .time-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('#signalsContent .time-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             currentTimeframe = btn.dataset.time;
             updateTradingViewChart();
@@ -330,8 +360,10 @@ function saveAttempts() {
 
 // Update attempts display
 function updateAttemptsDisplay() {
+    const el = document.getElementById('attemptsCount');
+    if (!el) return; // Admin mode - attemptsCount element was replaced
     const attemptsLeft = FREE_ATTEMPTS_LIMIT - attemptsUsed;
-    document.getElementById('attemptsCount').textContent = `${attemptsLeft} / ${FREE_ATTEMPTS_LIMIT}`;
+    el.textContent = `${attemptsLeft} / ${FREE_ATTEMPTS_LIMIT}`;
 }
 
 // Handle Get Signal button
@@ -351,11 +383,15 @@ async function handleGetSignal() {
     // Show loading
     showLoading();
 
+    // Map TradingView interval to API timeframe
+    const apiTimeframe = TIMEFRAME_MAP[currentTimeframe] || '15m';
+    const displayTimeframe = apiTimeframe;
+
     try {
         console.log('Calling AI API:', {
             url: `${API_BASE_URL}/predict`,
             symbol: selectedCoin,
-            timeframe: currentTimeframe + 'm',
+            timeframe: apiTimeframe,
             user_id: userId
         });
 
@@ -368,7 +404,7 @@ async function handleGetSignal() {
             },
             body: JSON.stringify({
                 symbol: selectedCoin,
-                timeframe: currentTimeframe + 'm',
+                timeframe: apiTimeframe,
                 user_id: userId
             })
         });
@@ -378,13 +414,6 @@ async function handleGetSignal() {
         if (!response.ok) {
             const errorText = await response.text();
             console.error('API Error:', errorText);
-
-            // If model not found (404), use demo mode
-            if (response.status === 404) {
-                console.warn('Model not found - using demo mode');
-                throw new Error('DEMO_MODE');
-            }
-
             throw new Error(`API Error: ${response.status} - ${errorText}`);
         }
 
@@ -399,24 +428,22 @@ async function handleGetSignal() {
         const entryPrice = prediction.price || currentPrice;
 
         if (prediction.signal === 'LONG') {
-            // LONG: SL below, TP above
-            stopLoss = entryPrice * 0.98;  // 2% below
-            takeProfit = entryPrice * 1.04;  // 4% above (Risk:Reward 1:2)
+            stopLoss = entryPrice * 0.98;
+            takeProfit = entryPrice * 1.04;
         } else if (prediction.signal === 'SHORT') {
-            // SHORT: SL above, TP below
-            stopLoss = entryPrice * 1.02;  // 2% above
-            takeProfit = entryPrice * 0.96;  // 4% below
+            stopLoss = entryPrice * 1.02;
+            takeProfit = entryPrice * 0.96;
         }
 
-        // Add SL/TP to signal data
+        // confidence from API is already a percentage (e.g. 39.06 = 39.06%)
         const signalData = {
             signal: prediction.signal,
-            confidence: prediction.confidence,
+            confidence: prediction.confidence / 100,  // Store as decimal for display
             entryPrice,
             stopLoss,
             takeProfit,
             coin: selectedCoin,
-            timeframe: currentTimeframe + 'm',
+            timeframe: displayTimeframe,
             timestamp: new Date().toISOString(),
             timestampFormatted: new Date().toLocaleString(),
             reason: prediction.reason || ''
@@ -434,7 +461,6 @@ async function handleGetSignal() {
             saveAttempts();
             updateAttemptsDisplay();
 
-            // If this was the last free attempt, show modal after a delay
             if (attemptsUsed >= FREE_ATTEMPTS_LIMIT) {
                 setTimeout(() => {
                     showSubscriptionModal();
@@ -454,84 +480,11 @@ async function handleGetSignal() {
         console.error('Error getting signal:', error);
         hideLoading();
 
-        // If DEMO_MODE (no models yet), use mock data
-        if (error.message === 'DEMO_MODE') {
-            console.warn('Using demo prediction (models not trained yet)');
+        // Show error message
+        showErrorResult('Failed to get signal. Please try again.');
 
-            // Generate mock prediction for demo
-            const mockSignals = [
-                { signal: 'LONG', confidence: 0.78 },
-                { signal: 'SHORT', confidence: 0.72 },
-                { signal: 'NO TRADE', confidence: 0.55 }
-            ];
-
-            const mockPrediction = mockSignals[Math.floor(Math.random() * mockSignals.length)];
-
-            // Calculate SL/TP
-            let stopLoss = 0;
-            let takeProfit = 0;
-            const entryPrice = currentPrice;
-
-            if (mockPrediction.signal === 'LONG') {
-                stopLoss = entryPrice * 0.98;
-                takeProfit = entryPrice * 1.04;
-            } else if (mockPrediction.signal === 'SHORT') {
-                stopLoss = entryPrice * 1.02;
-                takeProfit = entryPrice * 0.96;
-            }
-
-            const signalData = {
-                signal: mockPrediction.signal,
-                confidence: mockPrediction.confidence,
-                entryPrice,
-                stopLoss,
-                takeProfit,
-                coin: selectedCoin,
-                timeframe: currentTimeframe + 'm',
-                timestamp: new Date().toISOString(),
-                timestampFormatted: new Date().toLocaleString(),
-                reason: 'Demo mode - models not trained yet'
-            };
-
-            // Save to history
-            if (mockPrediction.signal !== 'NO TRADE') {
-                signalHistory.unshift(signalData);
-                localStorage.setItem('alpina_signal_history', JSON.stringify(signalHistory));
-            }
-
-            // Increment attempts (only for non-admins)
-            if (!isAdmin()) {
-                attemptsUsed++;
-                saveAttempts();
-                updateAttemptsDisplay();
-
-                if (attemptsUsed >= FREE_ATTEMPTS_LIMIT) {
-                    setTimeout(() => {
-                        showSubscriptionModal();
-                    }, 3000);
-                }
-            }
-
-            // Show result
-            showSignalResult(signalData);
-
-            // Show demo warning
-            setTimeout(() => {
-                alert('⚠️ Demo Mode\n\nAI models are being trained.\nShowing demo predictions for now.');
-            }, 1000);
-
-            if (tg.HapticFeedback) {
-                tg.HapticFeedback.notificationOccurred('success');
-            }
-
-        } else {
-            // Real error - show error message
-            showErrorResult();
-
-            // Haptic feedback for error
-            if (tg.HapticFeedback) {
-                tg.HapticFeedback.notificationOccurred('error');
-            }
+        if (tg.HapticFeedback) {
+            tg.HapticFeedback.notificationOccurred('error');
         }
     }
 }
@@ -892,39 +845,34 @@ function updateHistoryDisplay() {
 }
 
 // Tab navigation functions
-function showSignalsTab() {
-    // Update active button
-    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
-
-    // Show signals content, hide others
-    document.getElementById('signalsContent').style.display = 'block';
+function hideAllContent() {
+    document.getElementById('signalsContent').style.display = 'none';
     document.getElementById('historyContent').style.display = 'none';
     document.getElementById('aboutContent').style.display = 'none';
+    document.getElementById('adminContent').style.display = 'none';
+}
+
+function setActiveNavBtn(clickedBtn) {
+    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+    if (clickedBtn) clickedBtn.classList.add('active');
+}
+
+function showSignalsTab() {
+    setActiveNavBtn(event?.target);
+    hideAllContent();
+    document.getElementById('signalsContent').style.display = 'block';
 }
 
 function showHistoryTab() {
-    // Update active button
-    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
-
-    // Show history content, hide others
-    document.getElementById('signalsContent').style.display = 'none';
+    setActiveNavBtn(event?.target);
+    hideAllContent();
     document.getElementById('historyContent').style.display = 'block';
-    document.getElementById('aboutContent').style.display = 'none';
-
-    // Refresh history display
     updateHistoryDisplay();
 }
 
 function showAboutTab() {
-    // Update active button
-    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
-
-    // Show about content, hide others
-    document.getElementById('signalsContent').style.display = 'none';
-    document.getElementById('historyContent').style.display = 'none';
+    setActiveNavBtn(event?.target);
+    hideAllContent();
     document.getElementById('aboutContent').style.display = 'block';
 }
 
@@ -935,14 +883,8 @@ function showAdminTab() {
         return;
     }
 
-    // Update active button
-    document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
-
-    // Show admin content, hide others
-    document.getElementById('signalsContent').style.display = 'none';
-    document.getElementById('historyContent').style.display = 'none';
-    document.getElementById('aboutContent').style.display = 'none';
+    setActiveNavBtn(event?.target);
+    hideAllContent();
     document.getElementById('adminContent').style.display = 'block';
 
     // Load admin stats

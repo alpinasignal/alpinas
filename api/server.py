@@ -180,6 +180,42 @@ async def get_supported_pairs():
     }
 
 
+class RegisterUserRequest(BaseModel):
+    telegram_id: int
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+
+
+@app.post("/api/v1/register-user")
+async def register_user(request: RegisterUserRequest):
+    """
+    Register or update user when they open the Mini App.
+    Called automatically on app load.
+    """
+    try:
+        user = subscription_manager.create_user(
+            telegram_id=request.telegram_id,
+            username=request.username,
+            first_name=request.first_name
+        )
+
+        if user:
+            return {
+                "success": True,
+                "user_id": user.id,
+                "telegram_id": user.telegram_id
+            }
+        else:
+            return {
+                "success": True,
+                "message": "User registered (no DB)"
+            }
+
+    except Exception as e:
+        logger.error(f"Error registering user: {e}")
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/api/v1/predict", response_model=PredictionResponse)
 async def get_prediction(
     request: PredictionRequest,
@@ -484,18 +520,23 @@ async def get_admin_stats(
         return {"error": str(e)}
 
 
-@app.post("/api/v1/verify-payment")
-async def verify_payment(
-    user_id: int,
-    plan: str,
-    amount: float,
+class VerifyPaymentRequest(BaseModel):
+    user_id: int
+    plan: str
+    amount: float
     wallet_address: str
-):
+
+
+@app.post("/api/v1/verify-payment")
+async def verify_payment(request: VerifyPaymentRequest):
     """
     Verify USDT TRC20 payment for subscription
 
     Automatically checks TRON blockchain for payment and activates subscription
     """
+    user_id = request.user_id
+    plan = request.plan
+    amount = request.amount
     logger.info(f"Payment verification requested: user={user_id}, plan={plan}, amount=${amount}")
 
     try:

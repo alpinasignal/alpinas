@@ -98,18 +98,30 @@ class DatabaseManager:
             return
 
         try:
-            # Add connect_args for IPv4-only and connection pooling
-            connect_args = {
-                'connect_timeout': 10,
-                'options': '-c search_path=public'
-            }
+            # Different connect_args for different databases
+            if 'sqlite' in self.database_url.lower():
+                # SQLite - simpler connection args
+                connect_args = {}
+                engine_kwargs = {
+                    'connect_args': connect_args,
+                    'pool_pre_ping': True
+                }
+            else:
+                # PostgreSQL - full connection args
+                connect_args = {
+                    'connect_timeout': 10,
+                    'options': '-c search_path=public'
+                }
+                engine_kwargs = {
+                    'connect_args': connect_args,
+                    'pool_pre_ping': True,
+                    'pool_size': 5,
+                    'max_overflow': 10
+                }
 
             self.engine = create_engine(
                 self.database_url,
-                connect_args=connect_args,
-                pool_pre_ping=True,  # Verify connections before using
-                pool_size=5,
-                max_overflow=10
+                **engine_kwargs
             )
 
             # Try to create tables
@@ -168,7 +180,13 @@ class SubscriptionManager:
             if user:
                 # Update last active
                 user.last_active = datetime.utcnow()
+                if username:
+                    user.username = username
+                if first_name:
+                    user.first_name = first_name
                 session.commit()
+                # Re-query to get a fresh instance
+                user = session.query(User).filter(User.telegram_id == telegram_id).first()
                 return user
 
             # Create new user
@@ -178,17 +196,23 @@ class SubscriptionManager:
                 first_name=first_name
             )
             session.add(user)
-            session.commit()
-            session.refresh(user)
+            session.flush()  # Get the ID assigned
 
             # Create free subscription
             self._create_free_subscription(session, user.id)
+
+            session.commit()
+
+            # Re-query to get a clean instance
+            user = session.query(User).filter(User.telegram_id == telegram_id).first()
 
             logger.info(f"Created new user: {telegram_id}")
             return user
 
         except Exception as e:
             logger.error(f"Error creating user: {e}")
+            if session:
+                session.rollback()
             return None
         finally:
             if session:
