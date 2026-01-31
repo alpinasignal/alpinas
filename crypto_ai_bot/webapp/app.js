@@ -34,14 +34,17 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log('Telegram WebApp:', tg);
     console.log('Telegram initDataUnsafe:', tg.initDataUnsafe);
 
-    // Load user info FIRST (sets userId)
+    // CRITICAL: Setup event listeners FIRST (before anything can crash)
+    try { setupEventListeners(); } catch(e) { console.error('setupEventListeners error:', e); }
+    try { initializeTradingView(); } catch(e) { console.error('initializeTradingView error:', e); }
+    try { loadAttempts(); } catch(e) { console.error('loadAttempts error:', e); }
+    try { loadSignalHistory(); } catch(e) { console.error('loadSignalHistory error:', e); }
+
+    // Load user info LAST (admin check may modify DOM)
     loadUserInfo();
 
-    // Then initialize app
-    initializeApp();
-    setupEventListeners();
-    loadAttempts();
-    initializeTradingView();
+    // Apply admin UI if already detected
+    applyAdminUI();
 });
 
 // Check if user is admin
@@ -49,16 +52,17 @@ function isAdmin() {
     return ADMIN_IDS.includes(userId);
 }
 
-// Initialize app
-function initializeApp() {
-    updateAttemptsDisplay();
-    loadSignalHistory();
-
-    // If admin, show unlimited access and admin button
-    if (isAdmin()) {
-        document.querySelector('.attempts-banner span').innerHTML = '👑 <strong>Admin Access - Unlimited</strong>';
-        document.getElementById('adminBtn').style.display = 'block';
-        console.log('Admin logged in');
+// Apply admin UI (safe to call multiple times)
+function applyAdminUI() {
+    if (!isAdmin()) return;
+    try {
+        const banner = document.querySelector('.attempts-banner span');
+        if (banner) banner.innerHTML = '👑 <strong>Admin Access - Unlimited</strong>';
+        const adminBtn = document.getElementById('adminBtn');
+        if (adminBtn) adminBtn.style.display = 'block';
+        console.log('Admin UI applied');
+    } catch(e) {
+        console.error('applyAdminUI error:', e);
     }
 }
 
@@ -107,12 +111,8 @@ function applyUserInfo(telegramUser, usernameEl, userIdEl) {
         userId = telegramUser.id;
         console.log('✅ User ID set:', userId);
 
-        // Check if admin
-        if (isAdmin()) {
-            document.querySelector('.attempts-banner span').innerHTML = '👑 <strong>Admin Access - Unlimited</strong>';
-            document.getElementById('adminBtn').style.display = 'block';
-            console.log('👑 Admin logged in');
-        }
+        // Apply admin UI if this user is admin
+        applyAdminUI();
     } else {
         // Fallback for testing outside Telegram
         console.warn('⚠️ No Telegram user data - using demo mode');
@@ -353,8 +353,10 @@ function saveAttempts() {
 
 // Update attempts display
 function updateAttemptsDisplay() {
+    const el = document.getElementById('attemptsCount');
+    if (!el) return; // Admin mode - attemptsCount element was replaced
     const attemptsLeft = FREE_ATTEMPTS_LIMIT - attemptsUsed;
-    document.getElementById('attemptsCount').textContent = `${attemptsLeft} / ${FREE_ATTEMPTS_LIMIT}`;
+    el.textContent = `${attemptsLeft} / ${FREE_ATTEMPTS_LIMIT}`;
 }
 
 // Handle Get Signal button
