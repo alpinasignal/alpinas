@@ -414,7 +414,13 @@ async function handleGetSignal() {
         if (!response.ok) {
             const errorText = await response.text();
             console.error('API Error:', errorText);
-            throw new Error(`API Error: ${response.status} - ${errorText}`);
+            // Try to extract detail from JSON error
+            let detail = errorText;
+            try {
+                const errJson = JSON.parse(errorText);
+                detail = errJson.detail || errorText;
+            } catch(e) {}
+            throw new Error(`${response.status}::${detail}`);
         }
 
         const prediction = await response.json();
@@ -480,18 +486,13 @@ async function handleGetSignal() {
         console.error('Error getting signal:', error);
         hideLoading();
 
-        // Show detailed error for debugging
-        let errorMsg = 'Failed to get signal. Please try again.';
-        if (error.message) {
-            if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-                errorMsg = 'Server is restarting. Please wait 1-2 minutes and try again.';
-            } else if (error.message.includes('404')) {
-                errorMsg = 'Model not found for this pair/timeframe.';
-            } else if (error.message.includes('500')) {
-                errorMsg = 'Server error during prediction. Try again later.';
-            } else if (error.message.includes('422')) {
-                errorMsg = 'Request validation error. Please reload the app.';
-            }
+        // Show actual server error for debugging
+        let errorMsg = error.message || 'Failed to get signal. Please try again.';
+        if (errorMsg.includes('Failed to fetch') || errorMsg.includes('NetworkError')) {
+            errorMsg = 'Server is restarting. Please wait 1-2 minutes.';
+        } else if (errorMsg.includes('::')) {
+            // Show actual server error detail
+            errorMsg = errorMsg.split('::').slice(1).join('::');
         }
         showErrorResult(errorMsg);
 
