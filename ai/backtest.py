@@ -288,7 +288,7 @@ def backtest_model(
 
     # Load model
     logger.info(f"Loading model from {model_path}")
-    checkpoint = torch.load(model_path, map_location="cpu")
+    checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
 
     num_features = checkpoint["num_features"]
     model_type = checkpoint["model_type"]

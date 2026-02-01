@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nInitial commit: Alpina Signal - AI crypto prediction Telegram Mini App\n\n- Transformer neural network for LONG/SHORT/NO TRADE predictions\n- 15 crypto pairs x 3 timeframes \\(45 models\\)\n- FastAPI backend with prediction, admin stats, payment verification\n- Telegram Mini App frontend \\(TradingView charts, signals, history\\)\n- Admin panel with user statistics\n- USDT TRC20 payment system with blockchain verification\n- User registration on app load for admin tracking\n- SQLite \\(dev\\) / PostgreSQL \\(prod\\) database support\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  }
+}
