@@ -107,10 +107,10 @@ class DatabaseManager:
                     'pool_pre_ping': True
                 }
             else:
-                # PostgreSQL - full connection args
+                # PostgreSQL (Supabase) - requires SSL
                 connect_args = {
                     'connect_timeout': 10,
-                    'options': '-c search_path=public'
+                    'sslmode': 'require'
                 }
                 engine_kwargs = {
                     'connect_args': connect_args,
@@ -500,7 +500,7 @@ class SubscriptionManager:
 
             # Users by subscription tier
             tier_counts = {}
-            for tier in ["free", "basic", "pro", "premium"]:
+            for tier in ["free", "starter", "basic", "pro", "premium"]:
                 count = session.query(Subscription).filter(
                     Subscription.tier == tier,
                     Subscription.is_active == True

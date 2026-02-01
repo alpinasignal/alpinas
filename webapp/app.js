@@ -455,8 +455,8 @@ async function handleGetSignal() {
             localStorage.setItem('alpina_signal_history', JSON.stringify(signalHistory));
         }
 
-        // Increment attempts (only for non-admins)
-        if (!isAdmin()) {
+        // Increment attempts (only for non-admins, and only for real signals - NOT for NO TRADE)
+        if (!isAdmin() && prediction.signal !== 'NO TRADE') {
             attemptsUsed++;
             saveAttempts();
             updateAttemptsDisplay();

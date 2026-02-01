@@ -125,6 +125,12 @@ SUBSCRIPTION_TIERS = {
         "coins": [],  # user can pick any 2
         "telegram_alerts": False
     },
+    "starter": {
+        "predictions": 5,
+        "price": 9.99,
+        "coins": 3,
+        "telegram_alerts": False
+    },
     "basic": {
         "predictions": 3,
         "price": 14.99,
