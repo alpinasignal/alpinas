@@ -54,11 +54,14 @@ class BinanceDataFetcher:
         }
 
         try:
+            logger.debug(f"Requesting: {endpoint} params={params}")
             response = self.session.get(endpoint, params=params, timeout=30)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching klines for {symbol}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response status: {e.response.status_code}, body: {e.response.text[:500]}")
             return []
 
     def fetch_historical_data(
@@ -165,12 +168,13 @@ class BinanceDataFetcher:
         }
 
         try:
+            logger.info(f"Requesting: {endpoint} symbol={symbol} interval={interval} limit={params['limit']}")
             response = self.session.get(endpoint, params=params, timeout=30)
             response.raise_for_status()
             klines = response.json()
 
             if not klines:
-                logger.error(f"No data retrieved for {symbol}")
+                logger.error(f"No data retrieved for {symbol} (empty response)")
                 return None
 
             # Convert to DataFrame
@@ -196,6 +200,8 @@ class BinanceDataFetcher:
 
         except requests.exceptions.RequestException as e:
             logger.error(f"Error fetching latest candles for {symbol}: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"Response status: {e.response.status_code}, body: {e.response.text[:500]}")
             return None
 
     def save_to_cache(self, df: pd.DataFrame, symbol: str, timeframe: str):

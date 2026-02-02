@@ -27,8 +27,13 @@ from data.market import BinanceDataFetcher
 from payments.subscriptions import DatabaseManager, SubscriptionManager
 from payments.tron_verify import TronPaymentVerifier
 
-# Import bot functions for notifications
-from bot.bot import send_signal_notification
+# Import bot functions for notifications (safe import - don't crash server if bot module fails)
+try:
+    from bot.bot import send_signal_notification
+except Exception as _bot_import_err:
+    logger.warning(f"Could not import bot module: {_bot_import_err}")
+    async def send_signal_notification(*args, **kwargs):
+        pass
 
 # Initialize FastAPI app
 app = FastAPI(

@@ -127,6 +127,23 @@ class DatabaseManager:
             # Try to create tables
             Base.metadata.create_all(self.engine)
             self.SessionLocal = sessionmaker(bind=self.engine)
+
+            # Verify schema by running a test query
+            # If tables were created externally with different schema, this will fail
+            session = self.SessionLocal()
+            try:
+                session.query(User).limit(1).all()
+                session.close()
+                logger.info("Database schema verified OK")
+            except Exception as schema_error:
+                session.close()
+                logger.warning(f"Schema mismatch detected: {schema_error}")
+                logger.info("Recreating tables with correct schema...")
+                # Drop only our tables and recreate with correct schema
+                Base.metadata.drop_all(self.engine)
+                Base.metadata.create_all(self.engine)
+                logger.info("Tables recreated successfully")
+
             self._initialized = True
             logger.info("Database initialized successfully")
 
