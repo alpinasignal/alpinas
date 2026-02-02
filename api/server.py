@@ -305,11 +305,13 @@ async def get_prediction(
 
         return PredictionResponse(**prediction)
 
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
     except Exception as e:
-        logger.error(f"Error generating prediction: {e}")
+        logger.error(f"Error generating prediction for {symbol} {timeframe}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=str(e)
+            detail=f"Prediction error: {str(e)}"
         )
 
 

@@ -242,52 +242,58 @@ def load_model_and_predict(
     from data.features import FeatureEngine
     from ai.model import create_model
 
-    # Load model
-    logger.info(f"Loading model from {model_path}")
+    try:
+        # Load model
+        logger.info(f"Loading model from {model_path}")
 
-    if not os.path.exists(model_path):
-        logger.error(f"Model file not found: {model_path}")
-        return None
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"Model file not found: {model_path}")
 
-    checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+        checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
 
-    # Create model architecture
-    num_features = checkpoint["num_features"]
-    model_type = checkpoint["model_type"]
-    feature_names = checkpoint["feature_names"]
+        # Create model architecture
+        num_features = checkpoint["num_features"]
+        model_type = checkpoint["model_type"]
+        feature_names = checkpoint["feature_names"]
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = create_model(num_features, model_type=model_type, device=device)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = create_model(num_features, model_type=model_type, device=device)
 
-    # Load weights
-    model.load_state_dict(checkpoint["model_state_dict"])
-    model.eval()
+        # Load weights
+        model.load_state_dict(checkpoint["model_state_dict"])
+        model.eval()
 
-    logger.info(f"Model loaded: {model_type} with {num_features} features")
+        logger.info(f"Model loaded: {model_type} with {num_features} features")
 
-    # Fetch latest data
-    logger.info(f"Fetching latest data for {symbol} {timeframe}")
-    fetcher = BinanceDataFetcher()
-    df = fetcher.fetch_latest_candles(
-        symbol,
-        timeframe,
-        num_candles=config.SEQUENCE_LENGTH + 200  # Extra for feature computation
-    )
+        # Fetch latest data
+        logger.info(f"Fetching latest data for {symbol} {timeframe}")
+        fetcher = BinanceDataFetcher()
+        df = fetcher.fetch_latest_candles(
+            symbol,
+            timeframe,
+            num_candles=config.SEQUENCE_LENGTH + 200  # Extra for feature computation
+        )
 
-    if df is None:
-        logger.error(f"Failed to fetch data for {symbol} {timeframe}")
-        return None
+        if df is None:
+            raise RuntimeError(f"Failed to fetch market data for {symbol} {timeframe} from Binance API")
 
-    # Create features
-    logger.info("Computing features...")
-    engine = FeatureEngine()
-    df = engine.create_all_features(df)
+        if len(df) < config.SEQUENCE_LENGTH:
+            raise RuntimeError(f"Not enough candles: got {len(df)}, need {config.SEQUENCE_LENGTH}")
 
-    # Generate prediction
-    signal_gen = SignalGenerator(model, feature_names, device=device)
-    prediction = signal_gen.predict_symbol(df, symbol, timeframe)
+        # Create features
+        logger.info("Computing features...")
+        engine = FeatureEngine()
+        df = engine.create_all_features(df)
 
-    return prediction
+        # Generate prediction
+        signal_gen = SignalGenerator(model, feature_names, device=device)
+        prediction = signal_gen.predict_symbol(df, symbol, timeframe)
+
+        return prediction
+
+    except Exception as e:
+        logger.error(f"Prediction failed for {symbol} {timeframe}: {e}")
+        raise
 
 
 def format_signal_output(prediction: Dict) -> str:

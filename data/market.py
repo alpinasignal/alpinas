@@ -26,7 +26,7 @@ class BinanceDataFetcher:
     """
 
     def __init__(self):
-        self.base_url = config.BINANCE_FUTURES_URL
+        self.base_url = config.BINANCE_BASE_URL
         self.session = requests.Session()
 
     def _timeframe_to_binance(self, timeframe: str) -> str:
@@ -43,14 +43,14 @@ class BinanceDataFetcher:
         Fetch klines from Binance API
         Returns list of candles
         """
-        endpoint = f"{self.base_url}/fapi/v1/klines"
+        endpoint = f"{self.base_url}/api/v3/klines"
 
         params = {
             "symbol": symbol,
             "interval": interval,
             "startTime": start_time,
             "endTime": end_time,
-            "limit": 1500  # max limit per request
+            "limit": 1000  # max limit per request for Spot API
         }
 
         try:
@@ -156,12 +156,12 @@ class BinanceDataFetcher:
         logger.info(f"Fetching latest {num_candles} candles for {symbol} {timeframe}")
 
         interval = self._timeframe_to_binance(timeframe)
-        endpoint = f"{self.base_url}/fapi/v1/klines"
+        endpoint = f"{self.base_url}/api/v3/klines"
 
         params = {
             "symbol": symbol,
             "interval": interval,
-            "limit": min(num_candles, 1500)
+            "limit": min(num_candles, 1000)
         }
 
         try:
