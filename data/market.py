@@ -1,7 +1,7 @@
 """
-Binance Market Data Fetcher
+Market Data Fetcher
 Retrieves historical OHLCV data without API keys
-Professional data pipeline with proper error handling
+Supports Binance with automatic Bybit fallback for US servers
 """
 
 import requests
@@ -21,12 +21,23 @@ import config
 
 class BinanceDataFetcher:
     """
-    Fetches historical OHLCV data from Binance public API
+    Fetches historical OHLCV data from exchange APIs
+    Tries Binance first, auto-falls back to Bybit if blocked (HTTP 451)
     No authentication required
     """
 
+    # Class-level flag: once Binance is detected as blocked, use Bybit for all instances
+    _use_bybit = False
+
+    BYBIT_INTERVAL_MAP = {
+        "15m": "15",
+        "1h": "60",
+        "4h": "240"
+    }
+
     def __init__(self):
-        self.base_url = config.BINANCE_BASE_URL
+        self.binance_url = config.BINANCE_BASE_URL  # https://api.binance.com
+        self.bybit_url = "https://api.bybit.com"
         self.session = requests.Session()
 
     def _timeframe_to_binance(self, timeframe: str) -> str:
@@ -38,30 +49,117 @@ class BinanceDataFetcher:
         }
         return mapping.get(timeframe, "1h")
 
-    def _get_klines(self, symbol: str, interval: str, start_time: int, end_time: int) -> List:
-        """
-        Fetch klines from Binance API
-        Returns list of candles
-        """
-        endpoint = f"{self.base_url}/api/v3/klines"
-
+    def _fetch_binance_klines(self, symbol: str, interval: str, limit: int,
+                               start_time: int = None, end_time: int = None) -> List:
+        """Fetch klines from Binance API"""
+        endpoint = f"{self.binance_url}/api/v3/klines"
         params = {
             "symbol": symbol,
             "interval": interval,
-            "startTime": start_time,
-            "endTime": end_time,
-            "limit": 1000  # max limit per request for Spot API
+            "limit": min(limit, 1000)
         }
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
 
+        response = self.session.get(endpoint, params=params, timeout=30)
+
+        # Check if blocked (US servers)
+        if response.status_code in (451, 403):
+            logger.warning(f"Binance blocked (HTTP {response.status_code}), switching to Bybit")
+            BinanceDataFetcher._use_bybit = True
+            raise requests.exceptions.HTTPError(
+                f"Binance blocked: HTTP {response.status_code}", response=response
+            )
+
+        response.raise_for_status()
+        return response.json()
+
+    def _fetch_bybit_klines(self, symbol: str, interval: str, limit: int,
+                             start_time: int = None, end_time: int = None) -> List:
+        """
+        Fetch klines from Bybit API as fallback
+        Converts Bybit response format to Binance-compatible format
+        """
+        bybit_interval = self.BYBIT_INTERVAL_MAP.get(interval, "60")
+
+        params = {
+            "category": "spot",
+            "symbol": symbol,
+            "interval": bybit_interval,
+            "limit": min(limit, 1000)
+        }
+        if start_time:
+            params["start"] = start_time
+        if end_time:
+            params["end"] = end_time
+
+        endpoint = f"{self.bybit_url}/v5/market/kline"
+        logger.debug(f"Bybit request: {endpoint} params={params}")
+
+        response = self.session.get(endpoint, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("retCode") != 0:
+            logger.error(f"Bybit API error: {data.get('retMsg')}")
+            return []
+
+        result_list = data.get("result", {}).get("list", [])
+        if not result_list:
+            return []
+
+        # Convert Bybit format to Binance-compatible format
+        # Bybit returns newest first - reverse to get chronological order
+        # Bybit candle: [startTime, open, high, low, close, volume, turnover]
+        klines = []
+        for candle in reversed(result_list):
+            klines.append([
+                int(candle[0]),   # open time (ms)
+                candle[1],        # open
+                candle[2],        # high
+                candle[3],        # low
+                candle[4],        # close
+                candle[5],        # volume
+                int(candle[0]),   # close time (approx)
+                candle[6],        # turnover as quote_volume
+                0,                # number of trades (N/A)
+                "0",              # taker buy base (N/A)
+                "0",              # taker buy quote (N/A)
+                "0"               # ignore
+            ])
+
+        return klines
+
+    def _get_klines(self, symbol: str, interval: str, start_time: int, end_time: int) -> List:
+        """
+        Fetch klines with automatic fallback
+        Tries Binance first, falls back to Bybit if blocked
+        """
+        # If already known to be blocked, go straight to Bybit
+        if BinanceDataFetcher._use_bybit:
+            try:
+                return self._fetch_bybit_klines(symbol, interval, 1000, start_time, end_time)
+            except Exception as e:
+                logger.error(f"Bybit klines error for {symbol}: {e}")
+                return []
+
+        # Try Binance first
         try:
-            logger.debug(f"Requesting: {endpoint} params={params}")
-            response = self.session.get(endpoint, params=params, timeout=30)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
+            return self._fetch_binance_klines(symbol, interval, 1000, start_time, end_time)
+        except requests.exceptions.HTTPError as e:
+            if BinanceDataFetcher._use_bybit:
+                # Binance was just blocked, try Bybit
+                try:
+                    return self._fetch_bybit_klines(symbol, interval, 1000, start_time, end_time)
+                except Exception as bybit_err:
+                    logger.error(f"Bybit fallback also failed for {symbol}: {bybit_err}")
+                    return []
+            logger.error(f"Binance klines error for {symbol}: {e}")
+            return []
+        except Exception as e:
             logger.error(f"Error fetching klines for {symbol}: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response status: {e.response.status_code}, body: {e.response.text[:500]}")
             return []
 
     def fetch_historical_data(
@@ -92,7 +190,7 @@ class BinanceDataFetcher:
         all_klines = []
         current_start = start_time
 
-        # Fetch data in chunks (Binance limit is 1500 candles per request)
+        # Fetch data in chunks
         while current_start < end_time:
             klines = self._get_klines(symbol, interval, current_start, end_time)
 
@@ -102,7 +200,7 @@ class BinanceDataFetcher:
             all_klines.extend(klines)
 
             # Update start time for next batch
-            current_start = klines[-1][0] + 1
+            current_start = int(klines[-1][0]) + 1
 
             # Rate limiting
             time.sleep(0.1)
@@ -159,19 +257,24 @@ class BinanceDataFetcher:
         logger.info(f"Fetching latest {num_candles} candles for {symbol} {timeframe}")
 
         interval = self._timeframe_to_binance(timeframe)
-        endpoint = f"{self.base_url}/api/v3/klines"
-
-        params = {
-            "symbol": symbol,
-            "interval": interval,
-            "limit": min(num_candles, 1000)
-        }
+        exchange = "Bybit" if BinanceDataFetcher._use_bybit else "Binance"
 
         try:
-            logger.info(f"Requesting: {endpoint} symbol={symbol} interval={interval} limit={params['limit']}")
-            response = self.session.get(endpoint, params=params, timeout=30)
-            response.raise_for_status()
-            klines = response.json()
+            # Try appropriate exchange
+            if BinanceDataFetcher._use_bybit:
+                klines = self._fetch_bybit_klines(symbol, interval, num_candles)
+                logger.info(f"Using Bybit for {symbol} {interval} (limit={num_candles})")
+            else:
+                try:
+                    klines = self._fetch_binance_klines(symbol, interval, num_candles)
+                    logger.info(f"Using Binance for {symbol} {interval}")
+                except requests.exceptions.HTTPError:
+                    if BinanceDataFetcher._use_bybit:
+                        # Just got blocked, retry with Bybit
+                        klines = self._fetch_bybit_klines(symbol, interval, num_candles)
+                        logger.info(f"Switched to Bybit for {symbol} {interval}")
+                    else:
+                        raise
 
             if not klines:
                 logger.error(f"No data retrieved for {symbol} (empty response)")
@@ -194,11 +297,11 @@ class BinanceDataFetcher:
 
             df = df.dropna().reset_index(drop=True)
 
-            logger.info(f"Successfully fetched {len(df)} latest candles for {symbol}")
+            logger.info(f"Successfully fetched {len(df)} latest candles for {symbol} via {exchange}")
 
             return df
 
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             logger.error(f"Error fetching latest candles for {symbol}: {e}")
             if hasattr(e, 'response') and e.response is not None:
                 logger.error(f"Response status: {e.response.status_code}, body: {e.response.text[:500]}")
