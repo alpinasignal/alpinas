@@ -275,7 +275,7 @@ def load_model_and_predict(
         )
 
         if df is None:
-            raise RuntimeError(f"Failed to fetch market data for {symbol} {timeframe} from Binance API")
+            raise RuntimeError(f"Failed to fetch market data for {symbol} {timeframe} from exchange API")
 
         if len(df) < config.SEQUENCE_LENGTH:
             raise RuntimeError(f"Not enough candles: got {len(df)}, need {config.SEQUENCE_LENGTH}")

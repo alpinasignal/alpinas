@@ -123,36 +123,41 @@ SUBSCRIPTION_TIERS = {
         "predictions": 2,
         "price": 0,
         "coins": [],  # user can pick any 2
-        "telegram_alerts": False
+        "telegram_alerts": False,
+        "daily_alerts": 0
     },
     "starter": {
         "predictions": 5,
         "price": 9.99,
         "coins": 3,
-        "telegram_alerts": False
+        "telegram_alerts": True,  # ✓ Telegram alerts for signals >70%
+        "daily_alerts": 3  # 3 alerts per day
     },
     "basic": {
         "predictions": 3,
         "price": 14.99,
         "coins": 3,
-        "telegram_alerts": False
+        "telegram_alerts": True,  # ✓ Telegram alerts for signals >70%
+        "daily_alerts": 3  # 3 alerts per day
     },
     "pro": {
         "predictions": 7,
         "price": 24.99,
         "coins": 7,
-        "telegram_alerts": True  # ✓ Telegram alerts for signals >70%
+        "telegram_alerts": True,  # ✓ Telegram alerts for signals >70%
+        "daily_alerts": 999  # Unlimited
     },
     "premium": {
         "predictions": 15,
         "price": 49.99,
         "coins": 15,
-        "telegram_alerts": True  # ✓ Telegram alerts for signals >70%
+        "telegram_alerts": True,  # ✓ Telegram alerts for signals >70%
+        "daily_alerts": 999  # Unlimited
     }
 }
 
-# Minimum confidence for Telegram alerts
-TELEGRAM_ALERT_MIN_CONFIDENCE = 0.70  # Only send alerts for 70%+ signals
+# Minimum confidence for Telegram alerts (as percentage, e.g., 70 means 70%)
+TELEGRAM_ALERT_MIN_CONFIDENCE = 70  # Only send alerts for 70%+ signals
 
 # ========================
 # API CONFIGURATION

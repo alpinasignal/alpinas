@@ -10,9 +10,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+from collections import defaultdict
 import sys
 import os
-from datetime import datetime
+from datetime import datetime, date
+import asyncio
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -68,6 +70,21 @@ loaded_models = {}
 # Initialize database manager (lazy initialization)
 db_manager = DatabaseManager()
 subscription_manager = SubscriptionManager(db_manager)
+
+# Daily notification counter (resets on server restart or day change)
+# Key: user_id, Value: {"date": "YYYY-MM-DD", "count": int}
+_notification_counts = defaultdict(lambda: {"date": None, "count": 0})
+
+
+def can_send_notification(user_id: int, daily_limit: int) -> bool:
+    """Check if user can receive notification (within daily limit)"""
+    today = date.today().isoformat()
+    if _notification_counts[user_id]["date"] != today:
+        _notification_counts[user_id] = {"date": today, "count": 0}
+    if _notification_counts[user_id]["count"] >= daily_limit:
+        return False
+    _notification_counts[user_id]["count"] += 1
+    return True
 
 
 # ========================
@@ -276,34 +293,44 @@ async def get_prediction(
             )
 
         # Check if user should receive Telegram alerts
-        # For Pro/Premium users with signals >70%
+        # For Starter/Basic/Pro/Premium users with signals >70%
         try:
-            # Get user's subscription tier
-            subscription = subscription_manager.get_subscription(user_id)
+            signal_type = prediction.get("signal")
+            confidence = prediction.get("confidence", 0)
+            is_strong_signal = (
+                confidence >= config.TELEGRAM_ALERT_MIN_CONFIDENCE and
+                signal_type in ["LONG", "SHORT"]
+            )
 
-            if subscription:
+            # Send notification to user if eligible
+            subscription = subscription_manager.get_subscription(user_id)
+            if subscription and is_strong_signal:
                 tier = subscription.tier.lower()
                 tier_info = config.SUBSCRIPTION_TIERS.get(tier, {})
                 has_alerts = tier_info.get("telegram_alerts", False)
+                daily_limit = tier_info.get("daily_alerts", 0)
 
-                # Check if signal is strong enough (>70%) and not "NO TRADE"
-                if (has_alerts and
-                    prediction.get("confidence", 0) >= config.TELEGRAM_ALERT_MIN_CONFIDENCE and
-                    prediction.get("signal") in ["LONG", "SHORT"]):
-
-                    # Send Telegram notification asynchronously (don't block API response)
-                    import asyncio
-                    telegram_id = request.user_id  # Telegram ID from request
-
-                    # Create task to send notification (non-blocking)
+                if has_alerts and can_send_notification(request.user_id, daily_limit):
+                    telegram_id = request.user_id
                     asyncio.create_task(
                         send_signal_notification(
                             telegram_id=telegram_id,
                             signal_data=prediction
                         )
                     )
+                    logger.info(f"Telegram alert queued for user {telegram_id}: {signal_type} {confidence:.1f}%")
 
-                    logger.info(f"Telegram alert queued for user {telegram_id}: {prediction.get('signal')} {prediction.get('confidence'):.1%}")
+            # Always notify admin for strong signals (>70% LONG/SHORT)
+            if is_strong_signal:
+                for admin_id in config.ADMIN_IDS:
+                    asyncio.create_task(
+                        send_signal_notification(
+                            telegram_id=admin_id,
+                            signal_data=prediction
+                        )
+                    )
+                logger.info(f"Admin alert queued: {symbol} {signal_type} {confidence:.1f}%")
+
         except Exception as e:
             # Don't fail the API if notification fails
             logger.warning(f"Failed to send Telegram alert: {e}")
