@@ -1,7 +1,8 @@
 """
 Market Data Fetcher
 Retrieves historical OHLCV data without API keys
-Supports Binance with automatic Bybit fallback for US servers
+Supports multiple exchanges with automatic fallback:
+Binance -> Bybit -> KuCoin
 """
 
 import requests
@@ -22,12 +23,12 @@ import config
 class BinanceDataFetcher:
     """
     Fetches historical OHLCV data from exchange APIs
-    Tries Binance first, auto-falls back to Bybit if blocked (HTTP 451)
+    Tries Binance -> Bybit -> KuCoin with automatic fallback
     No authentication required
     """
 
-    # Class-level flag: once Binance is detected as blocked, use Bybit for all instances
-    _use_bybit = False
+    # Class-level: track which exchange works (persists across instances)
+    _working_exchange = None  # None means not tested yet
 
     BYBIT_INTERVAL_MAP = {
         "15m": "15",
@@ -35,20 +36,32 @@ class BinanceDataFetcher:
         "4h": "240"
     }
 
+    KUCOIN_INTERVAL_MAP = {
+        "15m": "15min",
+        "1h": "1hour",
+        "4h": "4hour"
+    }
+
     def __init__(self):
-        self.binance_url = config.BINANCE_BASE_URL  # https://api.binance.com
+        self.binance_url = "https://api.binance.com"
         self.bybit_url = "https://api.bybit.com"
+        self.kucoin_url = "https://api.kucoin.com"
         self.session = requests.Session()
 
     def _timeframe_to_binance(self, timeframe: str) -> str:
         """Convert our timeframe format to Binance format"""
-        mapping = {
-            "15m": "15m",
-            "1h": "1h",
-            "4h": "4h"
-        }
+        mapping = {"15m": "15m", "1h": "1h", "4h": "4h"}
         return mapping.get(timeframe, "1h")
 
+    def _symbol_to_kucoin(self, symbol: str) -> str:
+        """Convert BTCUSDT to BTC-USDT for KuCoin"""
+        # Remove USDT suffix and add dash
+        if symbol.endswith("USDT"):
+            base = symbol[:-4]
+            return f"{base}-USDT"
+        return symbol
+
+    # ==================== BINANCE ====================
     def _fetch_binance_klines(self, symbol: str, interval: str, limit: int,
                                start_time: int = None, end_time: int = None) -> List:
         """Fetch klines from Binance API"""
@@ -65,10 +78,7 @@ class BinanceDataFetcher:
 
         response = self.session.get(endpoint, params=params, timeout=30)
 
-        # Check if blocked (US servers)
         if response.status_code in (451, 403):
-            logger.warning(f"Binance blocked (HTTP {response.status_code}), switching to Bybit")
-            BinanceDataFetcher._use_bybit = True
             raise requests.exceptions.HTTPError(
                 f"Binance blocked: HTTP {response.status_code}", response=response
             )
@@ -76,12 +86,10 @@ class BinanceDataFetcher:
         response.raise_for_status()
         return response.json()
 
+    # ==================== BYBIT ====================
     def _fetch_bybit_klines(self, symbol: str, interval: str, limit: int,
                              start_time: int = None, end_time: int = None) -> List:
-        """
-        Fetch klines from Bybit API as fallback
-        Converts Bybit response format to Binance-compatible format
-        """
+        """Fetch klines from Bybit API"""
         bybit_interval = self.BYBIT_INTERVAL_MAP.get(interval, "60")
 
         params = {
@@ -96,71 +104,126 @@ class BinanceDataFetcher:
             params["end"] = end_time
 
         endpoint = f"{self.bybit_url}/v5/market/kline"
-        logger.debug(f"Bybit request: {endpoint} params={params}")
-
         response = self.session.get(endpoint, params=params, timeout=30)
+
+        if response.status_code in (451, 403):
+            raise requests.exceptions.HTTPError(
+                f"Bybit blocked: HTTP {response.status_code}", response=response
+            )
+
         response.raise_for_status()
         data = response.json()
 
         if data.get("retCode") != 0:
-            logger.error(f"Bybit API error: {data.get('retMsg')}")
-            return []
+            raise Exception(f"Bybit API error: {data.get('retMsg')}")
 
         result_list = data.get("result", {}).get("list", [])
         if not result_list:
             return []
 
         # Convert Bybit format to Binance-compatible format
-        # Bybit returns newest first - reverse to get chronological order
-        # Bybit candle: [startTime, open, high, low, close, volume, turnover]
+        # Bybit returns newest first - reverse for chronological order
         klines = []
         for candle in reversed(result_list):
             klines.append([
-                int(candle[0]),   # open time (ms)
-                candle[1],        # open
-                candle[2],        # high
-                candle[3],        # low
-                candle[4],        # close
-                candle[5],        # volume
-                int(candle[0]),   # close time (approx)
-                candle[6],        # turnover as quote_volume
-                0,                # number of trades (N/A)
-                "0",              # taker buy base (N/A)
-                "0",              # taker buy quote (N/A)
-                "0"               # ignore
+                int(candle[0]), candle[1], candle[2], candle[3], candle[4], candle[5],
+                int(candle[0]), candle[6], 0, "0", "0", "0"
             ])
+        return klines
+
+    # ==================== KUCOIN ====================
+    def _fetch_kucoin_klines(self, symbol: str, interval: str, limit: int,
+                              start_time: int = None, end_time: int = None) -> List:
+        """Fetch klines from KuCoin API"""
+        kucoin_symbol = self._symbol_to_kucoin(symbol)
+        kucoin_interval = self.KUCOIN_INTERVAL_MAP.get(interval, "1hour")
+
+        params = {
+            "symbol": kucoin_symbol,
+            "type": kucoin_interval
+        }
+        # KuCoin uses seconds, not milliseconds
+        if start_time:
+            params["startAt"] = start_time // 1000
+        if end_time:
+            params["endAt"] = end_time // 1000
+
+        endpoint = f"{self.kucoin_url}/api/v1/market/candles"
+        response = self.session.get(endpoint, params=params, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+
+        if data.get("code") != "200000":
+            raise Exception(f"KuCoin API error: {data.get('msg')}")
+
+        result_list = data.get("data", [])
+        if not result_list:
+            return []
+
+        # KuCoin format: [time, open, close, high, low, volume, amount]
+        # Note: KuCoin returns newest first, time is in seconds
+        # Convert to Binance format: [time_ms, open, high, low, close, volume, ...]
+        klines = []
+        for candle in reversed(result_list):  # Reverse for chronological order
+            timestamp_ms = int(candle[0]) * 1000
+            klines.append([
+                timestamp_ms,       # open time (ms)
+                candle[1],          # open
+                candle[3],          # high (KuCoin index 3)
+                candle[4],          # low (KuCoin index 4)
+                candle[2],          # close (KuCoin index 2)
+                candle[5],          # volume
+                timestamp_ms,       # close time (approx)
+                candle[6],          # amount as quote_volume
+                0, "0", "0", "0"    # placeholders
+            ])
+
+        # Limit results
+        if len(klines) > limit:
+            klines = klines[-limit:]
 
         return klines
 
-    def _get_klines(self, symbol: str, interval: str, start_time: int, end_time: int) -> List:
+    # ==================== SMART FETCH WITH FALLBACK ====================
+    def _fetch_klines_with_fallback(self, symbol: str, interval: str, limit: int,
+                                     start_time: int = None, end_time: int = None) -> List:
         """
-        Fetch klines with automatic fallback
-        Tries Binance first, falls back to Bybit if blocked
+        Fetch klines with automatic exchange fallback
+        Order: Binance -> Bybit -> KuCoin
         """
-        # If already known to be blocked, go straight to Bybit
-        if BinanceDataFetcher._use_bybit:
-            try:
-                return self._fetch_bybit_klines(symbol, interval, 1000, start_time, end_time)
-            except Exception as e:
-                logger.error(f"Bybit klines error for {symbol}: {e}")
-                return []
+        exchanges = [
+            ("binance", self._fetch_binance_klines),
+            ("bybit", self._fetch_bybit_klines),
+            ("kucoin", self._fetch_kucoin_klines),
+        ]
 
-        # Try Binance first
-        try:
-            return self._fetch_binance_klines(symbol, interval, 1000, start_time, end_time)
-        except requests.exceptions.HTTPError as e:
-            if BinanceDataFetcher._use_bybit:
-                # Binance was just blocked, try Bybit
-                try:
-                    return self._fetch_bybit_klines(symbol, interval, 1000, start_time, end_time)
-                except Exception as bybit_err:
-                    logger.error(f"Bybit fallback also failed for {symbol}: {bybit_err}")
-                    return []
-            logger.error(f"Binance klines error for {symbol}: {e}")
-            return []
-        except Exception as e:
-            logger.error(f"Error fetching klines for {symbol}: {e}")
-            return []
+        # If we already know which exchange works, try it first
+        if BinanceDataFetcher._working_exchange:
+            working = BinanceDataFetcher._working_exchange
+            # Reorder to try working exchange first
+            exchanges = sorted(exchanges, key=lambda x: 0 if x[0] == working else 1)
+
+        last_error = None
+        for exchange_name, fetch_func in exchanges:
+            try:
+                logger.info(f"Trying {exchange_name.upper()} for {symbol} {interval}...")
+                klines = fetch_func(symbol, interval, limit, start_time, end_time)
+                if klines:
+                    # Remember this exchange works
+                    BinanceDataFetcher._working_exchange = exchange_name
+                    logger.info(f"Successfully fetched {len(klines)} candles from {exchange_name.upper()}")
+                    return klines
+            except Exception as e:
+                logger.warning(f"{exchange_name.upper()} failed: {e}")
+                last_error = e
+                continue
+
+        logger.error(f"All exchanges failed for {symbol}. Last error: {last_error}")
+        return []
+
+    def _get_klines(self, symbol: str, interval: str, start_time: int, end_time: int) -> List:
+        """Fetch klines for historical data (with start/end time)"""
+        return self._fetch_klines_with_fallback(symbol, interval, 1000, start_time, end_time)
 
     def fetch_historical_data(
         self,
@@ -198,11 +261,7 @@ class BinanceDataFetcher:
                 break
 
             all_klines.extend(klines)
-
-            # Update start time for next batch
             current_start = int(klines[-1][0]) + 1
-
-            # Rate limiting
             time.sleep(0.1)
 
             logger.debug(f"Fetched {len(klines)} candles, total: {len(all_klines)}")
@@ -218,23 +277,15 @@ class BinanceDataFetcher:
             "taker_buy_quote", "ignore"
         ])
 
-        # Keep only relevant columns
         df = df[["timestamp", "open", "high", "low", "close", "volume"]]
-
-        # Convert types
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        # Remove duplicates and sort
         df = df.drop_duplicates(subset=["timestamp"]).sort_values("timestamp").reset_index(drop=True)
-
-        # Remove any NaN rows
         df = df.dropna()
 
         logger.info(f"Successfully fetched {len(df)} candles for {symbol} {timeframe}")
-        logger.info(f"Date range: {df['timestamp'].min()} to {df['timestamp'].max()}")
-
         return df
 
     def fetch_latest_candles(
@@ -257,27 +308,12 @@ class BinanceDataFetcher:
         logger.info(f"Fetching latest {num_candles} candles for {symbol} {timeframe}")
 
         interval = self._timeframe_to_binance(timeframe)
-        exchange = "Bybit" if BinanceDataFetcher._use_bybit else "Binance"
 
         try:
-            # Try appropriate exchange
-            if BinanceDataFetcher._use_bybit:
-                klines = self._fetch_bybit_klines(symbol, interval, num_candles)
-                logger.info(f"Using Bybit for {symbol} {interval} (limit={num_candles})")
-            else:
-                try:
-                    klines = self._fetch_binance_klines(symbol, interval, num_candles)
-                    logger.info(f"Using Binance for {symbol} {interval}")
-                except requests.exceptions.HTTPError:
-                    if BinanceDataFetcher._use_bybit:
-                        # Just got blocked, retry with Bybit
-                        klines = self._fetch_bybit_klines(symbol, interval, num_candles)
-                        logger.info(f"Switched to Bybit for {symbol} {interval}")
-                    else:
-                        raise
+            klines = self._fetch_klines_with_fallback(symbol, interval, num_candles)
 
             if not klines:
-                logger.error(f"No data retrieved for {symbol} (empty response)")
+                logger.error(f"No data retrieved for {symbol}")
                 return None
 
             # Convert to DataFrame
@@ -287,34 +323,28 @@ class BinanceDataFetcher:
                 "taker_buy_quote", "ignore"
             ])
 
-            # Keep only relevant columns
             df = df[["timestamp", "open", "high", "low", "close", "volume"]]
-
-            # Convert types
             df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
             for col in ["open", "high", "low", "close", "volume"]:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
             df = df.dropna().reset_index(drop=True)
 
-            logger.info(f"Successfully fetched {len(df)} latest candles for {symbol} via {exchange}")
+            exchange = BinanceDataFetcher._working_exchange or "unknown"
+            logger.info(f"Successfully fetched {len(df)} candles for {symbol} via {exchange.upper()}")
 
             return df
 
         except Exception as e:
             logger.error(f"Error fetching latest candles for {symbol}: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"Response status: {e.response.status_code}, body: {e.response.text[:500]}")
             return None
 
     def save_to_cache(self, df: pd.DataFrame, symbol: str, timeframe: str):
         """Save fetched data to local cache"""
         cache_dir = config.DATA_DIR
         os.makedirs(cache_dir, exist_ok=True)
-
         filename = f"{symbol}_{timeframe}.parquet"
         filepath = os.path.join(cache_dir, filename)
-
         df.to_parquet(filepath, index=False)
         logger.info(f"Saved data to cache: {filepath}")
 
@@ -325,13 +355,10 @@ class BinanceDataFetcher:
         filepath = os.path.join(cache_dir, filename)
 
         if os.path.exists(filepath):
-            # Check if cache is recent (less than 1 day old)
             cache_age = time.time() - os.path.getmtime(filepath)
             if cache_age < 86400:  # 24 hours
                 logger.info(f"Loading data from cache: {filepath}")
-                df = pd.read_parquet(filepath)
-                return df
-
+                return pd.read_parquet(filepath)
         return None
 
     def fetch_or_load(
@@ -341,39 +368,21 @@ class BinanceDataFetcher:
         days: int = config.HISTORICAL_DAYS,
         use_cache: bool = True
     ) -> Optional[pd.DataFrame]:
-        """
-        Fetch data from API or load from cache
-
-        Args:
-            symbol: Trading pair
-            timeframe: Timeframe
-            days: Days of historical data
-            use_cache: Whether to use cached data if available
-
-        Returns:
-            DataFrame with OHLCV data
-        """
+        """Fetch data from API or load from cache"""
         if use_cache:
             cached_df = self.load_from_cache(symbol, timeframe)
             if cached_df is not None:
                 return cached_df
 
-        # Fetch from API
         df = self.fetch_historical_data(symbol, timeframe, days)
-
         if df is not None:
             self.save_to_cache(df, symbol, timeframe)
-
         return df
 
 
 def download_all_data():
-    """
-    Download historical data for all supported pairs and timeframes
-    This should be run once during initial setup
-    """
+    """Download historical data for all supported pairs and timeframes"""
     fetcher = BinanceDataFetcher()
-
     total = len(config.SUPPORTED_PAIRS) * len(config.TIMEFRAMES)
     current = 0
 
@@ -385,26 +394,21 @@ def download_all_data():
             logger.info(f"[{current}/{total}] Downloading {symbol} {timeframe}")
 
             df = fetcher.fetch_historical_data(symbol, timeframe)
-
             if df is not None:
                 fetcher.save_to_cache(df, symbol, timeframe)
             else:
                 logger.error(f"Failed to download {symbol} {timeframe}")
 
-            # Rate limiting between requests
             time.sleep(0.5)
 
     logger.info("Download complete!")
 
 
 if __name__ == "__main__":
-    # Setup logging
     from loguru import logger
     logger.add(
         os.path.join(config.LOGS_DIR, "data_download.log"),
         rotation="100 MB",
         level="INFO"
     )
-
-    # Download all data
     download_all_data()
