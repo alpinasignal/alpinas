@@ -87,10 +87,61 @@ class DatabaseManager:
     """Manages database connections and operations"""
 
     def __init__(self, database_url: str = config.DATABASE_URL):
-        self.database_url = database_url
+        self.database_url = self._fix_supabase_url(database_url)
         self.engine = None
         self.SessionLocal = None
         self._initialized = False
+
+    def _fix_supabase_url(self, url: str) -> str:
+        """
+        Convert Supabase direct connection to Session Pooler connection.
+        This fixes IPv6 connectivity issues on Railway and other platforms.
+
+        Direct: postgresql://postgres:xxx@db.xxx.supabase.co:5432/postgres
+        Pooler: postgresql://postgres.xxx:xxx@aws-0-eu-central-1.pooler.supabase.com:6543/postgres
+        """
+        if not url or 'sqlite' in url.lower():
+            return url
+
+        # If already using pooler, return as-is
+        if 'pooler.supabase.com' in url:
+            logger.info("Using Supabase Pooler connection")
+            return url
+
+        # Check if it's a Supabase URL (port 5432)
+        if '.supabase.co' in url and ':5432' in url:
+            try:
+                import re
+                # Extract project ref from db.PROJECT_REF.supabase.co
+                match = re.search(r'db\.([a-z0-9]+)\.supabase\.co', url)
+                if match:
+                    project_ref = match.group(1)
+
+                    # Extract password (between : and @)
+                    pwd_match = re.search(r'postgres:([^@]+)@', url)
+                    if pwd_match:
+                        password = pwd_match.group(1)
+
+                        # Try multiple regions - Railway is usually in US
+                        regions = [
+                            "aws-0-us-east-1",      # US East (Virginia) - most common
+                            "aws-0-us-west-1",      # US West
+                            "aws-0-eu-central-1",   # Europe (Frankfurt)
+                            "aws-0-ap-southeast-1", # Asia (Singapore)
+                        ]
+
+                        # Use first region (US East) as default for Railway
+                        region = regions[0]
+                        pooler_url = f"postgresql://postgres.{project_ref}:{password}@{region}.pooler.supabase.com:6543/postgres?sslmode=require"
+
+                        logger.info(f"Converted Supabase URL to Pooler (project: {project_ref}, region: {region})")
+                        return pooler_url
+
+            except Exception as e:
+                logger.warning(f"Could not convert Supabase URL to pooler: {e}")
+                logger.info("Trying original URL anyway...")
+
+        return url
 
     def _initialize(self):
         """Lazy initialization of database connection"""
@@ -107,16 +158,17 @@ class DatabaseManager:
                     'pool_pre_ping': True
                 }
             else:
-                # PostgreSQL (Supabase) - requires SSL
+                # PostgreSQL (Supabase) - requires SSL, shorter timeout
                 connect_args = {
-                    'connect_timeout': 10,
+                    'connect_timeout': 5,
                     'sslmode': 'require'
                 }
                 engine_kwargs = {
                     'connect_args': connect_args,
                     'pool_pre_ping': True,
-                    'pool_size': 5,
-                    'max_overflow': 10
+                    'pool_size': 3,
+                    'max_overflow': 5,
+                    'pool_timeout': 10
                 }
 
             self.engine = create_engine(

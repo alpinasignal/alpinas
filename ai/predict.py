@@ -192,11 +192,16 @@ class SignalGenerator:
         # Get probabilities
         probabilities = self.predict_probabilities(feature_tensor)
 
+        # Log probabilities for debugging
+        logger.info(f"{symbol} {timeframe} raw probabilities: NO_TRADE={probabilities[0]:.3f}, LONG={probabilities[1]:.3f}, SHORT={probabilities[2]:.3f}")
+
         # Assess volatility
         volatility_percentile, volatility_regime = self.assess_volatility(df)
+        logger.info(f"{symbol} {timeframe} volatility: {volatility_regime} ({volatility_percentile:.2%})")
 
         # Generate signal
         signal_info = self.generate_signal(probabilities, volatility_percentile)
+        logger.info(f"{symbol} {timeframe} signal: {signal_info['signal']} ({signal_info['confidence']:.1f}%)")
 
         # Get current price
         current_price = df["close"].iloc[-1]

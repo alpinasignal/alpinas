@@ -87,15 +87,15 @@ LABEL_LOOKAHEAD = 10
 # INFERENCE & SIGNAL GENERATION
 # ========================
 
-# Probability thresholds for signals - VERY STRICT for highest accuracy
-LONG_THRESHOLD = 0.75  # Only ultra-confident signals (75%+)
-SHORT_THRESHOLD = 0.75  # Only ultra-confident signals (75%+)
+# Probability thresholds for signals - balanced for more signals
+LONG_THRESHOLD = 0.55  # 55%+ confidence for LONG signal
+SHORT_THRESHOLD = 0.55  # 55%+ confidence for SHORT signal
 
 # Volatility filter (percentile)
-MAX_VOLATILITY_PERCENTILE = 85  # Stricter filter - avoid volatile markets
+MAX_VOLATILITY_PERCENTILE = 95  # Allow trading in most conditions
 
 # Minimum confidence to show (for UI)
-MIN_DISPLAY_CONFIDENCE = 65  # Higher threshold for display
+MIN_DISPLAY_CONFIDENCE = 50  # Show signals from 50%
 
 # ========================
 # ADMIN CONFIGURATION
