@@ -3,7 +3,7 @@ Subscription and Payment System
 Manages user subscriptions and access control
 """
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, JSON
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Boolean, JSON, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from datetime import datetime, timedelta
@@ -96,9 +96,6 @@ class DatabaseManager:
         """
         Convert Supabase direct connection to Session Pooler connection.
         This fixes IPv6 connectivity issues on Railway and other platforms.
-
-        Direct: postgresql://postgres:xxx@db.xxx.supabase.co:5432/postgres
-        Pooler: postgresql://postgres.xxx:xxx@aws-0-eu-central-1.pooler.supabase.com:6543/postgres
         """
         if not url or 'sqlite' in url.lower():
             return url
@@ -116,32 +113,58 @@ class DatabaseManager:
                 match = re.search(r'db\.([a-z0-9]+)\.supabase\.co', url)
                 if match:
                     project_ref = match.group(1)
+                    logger.info(f"Detected Supabase project: {project_ref}")
 
                     # Extract password (between : and @)
                     pwd_match = re.search(r'postgres:([^@]+)@', url)
                     if pwd_match:
                         password = pwd_match.group(1)
 
-                        # Try multiple regions - Railway is usually in US
-                        regions = [
-                            "aws-0-us-east-1",      # US East (Virginia) - most common
-                            "aws-0-us-west-1",      # US West
-                            "aws-0-eu-central-1",   # Europe (Frankfurt)
-                            "aws-0-ap-southeast-1", # Asia (Singapore)
-                        ]
+                        # Store project info for multi-region retry
+                        self._supabase_project = project_ref
+                        self._supabase_password = password
 
-                        # Use first region (US East) as default for Railway
-                        region = regions[0]
+                        # Default to EU Central (most Supabase projects)
+                        region = "aws-0-eu-central-1"
                         pooler_url = f"postgresql://postgres.{project_ref}:{password}@{region}.pooler.supabase.com:6543/postgres?sslmode=require"
 
-                        logger.info(f"Converted Supabase URL to Pooler (project: {project_ref}, region: {region})")
+                        logger.info(f"Converted to Supabase Pooler URL (region: {region})")
                         return pooler_url
 
             except Exception as e:
                 logger.warning(f"Could not convert Supabase URL to pooler: {e}")
-                logger.info("Trying original URL anyway...")
 
         return url
+
+    def _try_connect_with_regions(self):
+        """Try connecting with different Supabase regions"""
+        if not hasattr(self, '_supabase_project'):
+            return False
+
+        regions = [
+            "aws-0-eu-central-1",   # Europe (Frankfurt)
+            "aws-0-us-east-1",      # US East
+            "aws-0-us-west-1",      # US West
+            "aws-0-ap-southeast-1", # Asia
+        ]
+
+        for region in regions:
+            try:
+                test_url = f"postgresql://postgres.{self._supabase_project}:{self._supabase_password}@{region}.pooler.supabase.com:6543/postgres?sslmode=require"
+                test_engine = create_engine(test_url, connect_args={'connect_timeout': 5})
+
+                # Try to connect
+                with test_engine.connect() as conn:
+                    conn.execute(text("SELECT 1"))
+                    logger.info(f"Successfully connected to Supabase via {region}")
+                    self.database_url = test_url
+                    return True
+
+            except Exception as e:
+                logger.debug(f"Region {region} failed: {e}")
+                continue
+
+        return False
 
     def _initialize(self):
         """Lazy initialization of database connection"""
@@ -151,16 +174,15 @@ class DatabaseManager:
         try:
             # Different connect_args for different databases
             if 'sqlite' in self.database_url.lower():
-                # SQLite - simpler connection args
                 connect_args = {}
                 engine_kwargs = {
                     'connect_args': connect_args,
                     'pool_pre_ping': True
                 }
             else:
-                # PostgreSQL (Supabase) - requires SSL, shorter timeout
+                # PostgreSQL (Supabase)
                 connect_args = {
-                    'connect_timeout': 5,
+                    'connect_timeout': 10,
                     'sslmode': 'require'
                 }
                 engine_kwargs = {
@@ -168,20 +190,30 @@ class DatabaseManager:
                     'pool_pre_ping': True,
                     'pool_size': 3,
                     'max_overflow': 5,
-                    'pool_timeout': 10
+                    'pool_timeout': 15
                 }
 
-            self.engine = create_engine(
-                self.database_url,
-                **engine_kwargs
-            )
+            # First attempt with current URL
+            try:
+                self.engine = create_engine(self.database_url, **engine_kwargs)
+                # Test connection
+                with self.engine.connect() as conn:
+                    conn.execute(text("SELECT 1"))
+                logger.info("Database connection successful")
+            except Exception as conn_err:
+                logger.warning(f"First connection attempt failed: {conn_err}")
 
-            # Try to create tables
+                # Try different Supabase regions
+                if hasattr(self, '_supabase_project') and self._try_connect_with_regions():
+                    self.engine = create_engine(self.database_url, **engine_kwargs)
+                else:
+                    raise conn_err
+
+            # Create tables
             Base.metadata.create_all(self.engine)
             self.SessionLocal = sessionmaker(bind=self.engine)
 
-            # Verify schema by running a test query
-            # If tables were created externally with different schema, this will fail
+            # Verify schema
             session = self.SessionLocal()
             try:
                 session.query(User).limit(1).all()
@@ -189,21 +221,29 @@ class DatabaseManager:
                 logger.info("Database schema verified OK")
             except Exception as schema_error:
                 session.close()
-                logger.warning(f"Schema mismatch detected: {schema_error}")
-                logger.info("Recreating tables with correct schema...")
-                # Drop only our tables and recreate with correct schema
+                logger.warning(f"Schema mismatch: {schema_error}")
+                logger.info("Recreating tables...")
                 Base.metadata.drop_all(self.engine)
                 Base.metadata.create_all(self.engine)
                 logger.info("Tables recreated successfully")
 
             self._initialized = True
-            logger.info("Database initialized successfully")
+            logger.info("✓ Database initialized successfully")
 
         except Exception as e:
             logger.error(f"Database initialization failed: {e}")
-            logger.warning("Running in fallback mode without database")
-            # Set fallback mode - app will still work without DB
-            self._initialized = False
+            logger.warning("Running in fallback mode (SQLite)")
+            # Fallback to local SQLite
+            try:
+                self.database_url = "sqlite:///./alpina_signal.db"
+                self.engine = create_engine(self.database_url, connect_args={})
+                Base.metadata.create_all(self.engine)
+                self.SessionLocal = sessionmaker(bind=self.engine)
+                self._initialized = True
+                logger.info("✓ Fallback to SQLite successful")
+            except Exception as sqlite_err:
+                logger.error(f"SQLite fallback also failed: {sqlite_err}")
+                self._initialized = False
 
     def get_session(self) -> Optional[Session]:
         """Get database session"""

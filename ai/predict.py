@@ -101,48 +101,72 @@ class SignalGenerator:
         """
         Generate trading signal from probabilities
 
-        Args:
-            probabilities: [num_classes] probability distribution
-            volatility_percentile: Current volatility percentile
-            long_threshold: Minimum probability for LONG signal
-            short_threshold: Minimum probability for SHORT signal
-            max_vol_percentile: Maximum allowed volatility
+        NEW LOGIC: Always show the best signal based on highest probability.
+        - If LONG has highest prob → LONG signal
+        - If SHORT has highest prob → SHORT signal
+        - If NO_TRADE has highest prob → NO TRADE
 
-        Returns:
-            Signal dictionary
+        Signal strength based on confidence:
+        - Strong: >60%
+        - Moderate: 45-60%
+        - Weak: <45%
         """
         prob_no_trade = probabilities[0]
         prob_long = probabilities[1]
         prob_short = probabilities[2]
 
-        # Default: NO TRADE
-        signal = "NO TRADE"
-        signal_class = 0
-        confidence = max(probabilities) * 100
-
-        # Volatility filter: if too high, NO TRADE regardless of probabilities
+        # Volatility filter: if extreme, warn but still show signal
+        vol_warning = ""
         if volatility_percentile > max_vol_percentile:
-            signal = "NO TRADE"
-            signal_class = 0
-            confidence = 0
-            reason = "Volatility too high"
-        else:
-            # Check thresholds
-            if prob_long >= long_threshold:
+            vol_warning = " (High volatility - trade with caution)"
+
+        # Find the highest probability class
+        max_prob = max(probabilities)
+        max_idx = int(np.argmax(probabilities))
+
+        # Determine signal based on highest probability
+        if max_idx == 1:  # LONG has highest probability
+            signal = "LONG"
+            signal_class = 1
+            confidence = prob_long * 100
+
+            # Determine strength
+            if prob_long >= 0.60:
+                reason = "Strong bullish signal" + vol_warning
+            elif prob_long >= 0.45:
+                reason = "Moderate bullish signal" + vol_warning
+            else:
+                reason = "Weak bullish tendency" + vol_warning
+
+        elif max_idx == 2:  # SHORT has highest probability
+            signal = "SHORT"
+            signal_class = 2
+            confidence = prob_short * 100
+
+            if prob_short >= 0.60:
+                reason = "Strong bearish signal" + vol_warning
+            elif prob_short >= 0.45:
+                reason = "Moderate bearish signal" + vol_warning
+            else:
+                reason = "Weak bearish tendency" + vol_warning
+
+        else:  # NO_TRADE has highest probability (or equal)
+            # Check if LONG or SHORT is close (within 5%)
+            if prob_long > prob_short and (prob_no_trade - prob_long) < 0.10:
                 signal = "LONG"
                 signal_class = 1
                 confidence = prob_long * 100
-                reason = "High probability of upward movement"
-            elif prob_short >= short_threshold:
+                reason = "Slight bullish bias - wait for confirmation" + vol_warning
+            elif prob_short > prob_long and (prob_no_trade - prob_short) < 0.10:
                 signal = "SHORT"
                 signal_class = 2
                 confidence = prob_short * 100
-                reason = "High probability of downward movement"
+                reason = "Slight bearish bias - wait for confirmation" + vol_warning
             else:
                 signal = "NO TRADE"
                 signal_class = 0
-                confidence = max(probabilities) * 100
-                reason = "Insufficient confidence"
+                confidence = prob_no_trade * 100
+                reason = "Market conditions unclear - wait for setup" + vol_warning
 
         return {
             "signal": signal,
