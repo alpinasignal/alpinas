@@ -56,21 +56,21 @@ ATR_PERIOD = 14
 # NEURAL NETWORK
 # ========================
 
-# Model architecture - OPTIMIZED FOR CPU TRAINING
+# Model architecture - OPTIMIZED FOR ACCURACY
 MODEL_TYPE = "transformer"  # "transformer" or "lstm"
-HIDDEN_DIM = 64  # Compact model for fast CPU training
-NUM_LAYERS = 2  # 2 layers - enough for pattern learning
-NUM_HEADS = 4  # 4 attention heads (must divide HIDDEN_DIM)
-DROPOUT = 0.2  # Moderate regularization
+HIDDEN_DIM = 128  # Larger model for better pattern recognition
+NUM_LAYERS = 3  # 3 layers for deeper learning
+NUM_HEADS = 8  # 8 attention heads (must divide HIDDEN_DIM)
+DROPOUT = 0.15  # Slightly less dropout for more capacity
 NUM_CLASSES = 3  # NO TRADE, LONG, SHORT
 
-# Training configuration - Fast CPU training
-BATCH_SIZE = 128  # Larger batches for faster training
-LEARNING_RATE = 0.001  # Higher LR for faster convergence
-MAX_EPOCHS = 30  # 30 epochs - enough with early stopping
-EARLY_STOPPING_PATIENCE = 7  # Stop early if no improvement
+# Training configuration - Balanced for accuracy
+BATCH_SIZE = 64  # Smaller batches for better generalization
+LEARNING_RATE = 0.0005  # Lower LR for more stable training
+MAX_EPOCHS = 50  # More epochs for better convergence
+EARLY_STOPPING_PATIENCE = 10  # More patience for complex patterns
 VALIDATION_SPLIT = 0.15
-LABEL_SMOOTHING = 0.1  # Label smoothing for better generalization
+LABEL_SMOOTHING = 0.05  # Less smoothing for sharper predictions
 
 # Walk-forward validation
 TRAIN_TEST_SPLIT = 0.80  # 80% train, 20% test

@@ -227,19 +227,41 @@ class TransformerPredictor(nn.Module):
 
         return logits
 
-    def predict_proba(self, x: torch.Tensor) -> torch.Tensor:
+    def predict_proba(self, x: torch.Tensor, temperature: float = 1.0) -> torch.Tensor:
         """
-        Get probability distribution
+        Get probability distribution with optional temperature scaling
+
+        Temperature scaling calibrates confidence:
+        - temperature > 1: More uniform (less confident)
+        - temperature < 1: More peaked (more confident)
+        - temperature = 1: No change
 
         Args:
             x: [batch, seq_len, num_features]
+            temperature: Calibration temperature (default 1.0)
 
         Returns:
             probabilities: [batch, num_classes]
         """
         logits = self.forward(x)
-        probabilities = torch.softmax(logits, dim=-1)
+        # Apply temperature scaling for calibration
+        scaled_logits = logits / temperature
+        probabilities = torch.softmax(scaled_logits, dim=-1)
         return probabilities
+
+    def get_confidence_calibrated(self, x: torch.Tensor, temperature: float = 1.2) -> torch.Tensor:
+        """
+        Get calibrated probabilities with slight smoothing
+        Prevents overconfident predictions
+
+        Args:
+            x: Input tensor
+            temperature: Calibration temperature (>1 for smoother probs)
+
+        Returns:
+            Calibrated probabilities
+        """
+        return self.predict_proba(x, temperature=temperature)
 
 
 class LSTMPredictor(nn.Module):

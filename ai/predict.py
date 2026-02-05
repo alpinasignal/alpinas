@@ -50,7 +50,11 @@ class SignalGenerator:
                 features = features.unsqueeze(0)  # Add batch dimension
 
             features = features.to(self.device)
-            probabilities = self.model.predict_proba(features)
+
+            # Use temperature scaling for calibrated probabilities
+            # Temperature > 1 gives more conservative (less overconfident) predictions
+            temperature = 1.15  # Slightly smoothed for better calibration
+            probabilities = self.model.predict_proba(features, temperature=temperature)
             probabilities = probabilities.cpu().numpy()
 
             # Remove batch dimension if single sample

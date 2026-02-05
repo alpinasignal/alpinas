@@ -231,6 +231,173 @@ class FeatureEngine:
 
         return df
 
+    def compute_rsi(self, df: pd.DataFrame, periods: list = [7, 14, 21]) -> pd.DataFrame:
+        """
+        Relative Strength Index at multiple periods
+        Normalized to [-1, 1] range for better neural network training
+        """
+        for period in periods:
+            delta = df["close"].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+
+            rs = gain / (loss + 1e-8)
+            rsi = 100 - (100 / (1 + rs))
+
+            # Normalize RSI from [0, 100] to [-1, 1]
+            col_name = f"rsi_{period}"
+            df[col_name] = (rsi - 50) / 50
+            df[col_name] = df[col_name].fillna(0)
+
+            self.feature_names.append(col_name)
+
+        return df
+
+    def compute_macd(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        MACD indicator with signal line and histogram
+        All normalized by ATR
+        """
+        # MACD components
+        ema_12 = df["close"].ewm(span=12, adjust=False).mean()
+        ema_26 = df["close"].ewm(span=26, adjust=False).mean()
+        macd_line = ema_12 - ema_26
+        signal_line = macd_line.ewm(span=9, adjust=False).mean()
+        histogram = macd_line - signal_line
+
+        atr = self._compute_atr(df, period=14)
+
+        # Normalize by ATR
+        df["macd_norm"] = macd_line / (atr + 1e-8)
+        df["macd_signal_norm"] = signal_line / (atr + 1e-8)
+        df["macd_hist_norm"] = histogram / (atr + 1e-8)
+
+        # MACD crossover signal
+        df["macd_cross"] = np.where(macd_line > signal_line, 1, -1)
+
+        for col in ["macd_norm", "macd_signal_norm", "macd_hist_norm"]:
+            df[col] = df[col].fillna(0)
+            df[col] = np.clip(df[col], -5, 5)
+
+        self.feature_names.extend(["macd_norm", "macd_signal_norm", "macd_hist_norm", "macd_cross"])
+
+        return df
+
+    def compute_stochastic(self, df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> pd.DataFrame:
+        """
+        Stochastic Oscillator (%K and %D)
+        Normalized to [-1, 1] range
+        """
+        # %K
+        lowest_low = df["low"].rolling(window=k_period).min()
+        highest_high = df["high"].rolling(window=k_period).max()
+        stoch_k = 100 * (df["close"] - lowest_low) / (highest_high - lowest_low + 1e-8)
+
+        # %D (signal line)
+        stoch_d = stoch_k.rolling(window=d_period).mean()
+
+        # Normalize to [-1, 1]
+        df["stoch_k"] = (stoch_k - 50) / 50
+        df["stoch_d"] = (stoch_d - 50) / 50
+
+        # Stochastic crossover
+        df["stoch_cross"] = np.where(stoch_k > stoch_d, 1, -1)
+
+        for col in ["stoch_k", "stoch_d"]:
+            df[col] = df[col].fillna(0)
+
+        self.feature_names.extend(["stoch_k", "stoch_d", "stoch_cross"])
+
+        return df
+
+    def compute_support_resistance(self, df: pd.DataFrame, window: int = 20) -> pd.DataFrame:
+        """
+        Dynamic support/resistance levels
+        Distance to recent high/low levels normalized by ATR
+        """
+        atr = self._compute_atr(df, period=14)
+
+        # Rolling high/low as resistance/support
+        rolling_high = df["high"].rolling(window=window).max()
+        rolling_low = df["low"].rolling(window=window).min()
+
+        # Distance to resistance (negative = above resistance)
+        df["dist_resistance"] = (rolling_high - df["close"]) / (atr + 1e-8)
+        df["dist_resistance"] = df["dist_resistance"].fillna(0)
+        df["dist_resistance"] = np.clip(df["dist_resistance"], -5, 5)
+
+        # Distance to support (positive = above support)
+        df["dist_support"] = (df["close"] - rolling_low) / (atr + 1e-8)
+        df["dist_support"] = df["dist_support"].fillna(0)
+        df["dist_support"] = np.clip(df["dist_support"], -5, 5)
+
+        # Position within range (0 = at support, 1 = at resistance)
+        df["sr_position"] = (df["close"] - rolling_low) / (rolling_high - rolling_low + 1e-8)
+        df["sr_position"] = df["sr_position"].fillna(0.5)
+
+        self.feature_names.extend(["dist_resistance", "dist_support", "sr_position"])
+
+        return df
+
+    def compute_order_flow_proxy(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Order flow imbalance proxy using volume and price action
+        Estimates buying vs selling pressure
+        """
+        # Volume-weighted price change
+        price_change = df["close"] - df["open"]
+        volume_pressure = price_change * df["volume"]
+
+        # Normalize
+        df["volume_pressure"] = volume_pressure / (volume_pressure.rolling(20).std() + 1e-8)
+        df["volume_pressure"] = df["volume_pressure"].fillna(0)
+        df["volume_pressure"] = np.clip(df["volume_pressure"], -3, 3)
+
+        # Cumulative delta proxy (buying vs selling)
+        df["cum_delta"] = df["volume_pressure"].rolling(window=10).sum()
+        df["cum_delta"] = df["cum_delta"].fillna(0)
+        df["cum_delta"] = np.clip(df["cum_delta"], -10, 10)
+
+        # Volume climax detection
+        vol_ma = df["volume"].rolling(20).mean()
+        df["vol_climax"] = df["volume"] / (vol_ma + 1e-8)
+        df["vol_climax"] = np.where(df["vol_climax"] > 2, df["candle_direction"], 0)
+
+        self.feature_names.extend(["volume_pressure", "cum_delta", "vol_climax"])
+
+        return df
+
+    def compute_multi_timeframe_momentum(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Multi-timeframe momentum signals
+        Helps capture trend alignment across periods
+        """
+        # Short-term momentum (fast)
+        df["momentum_fast"] = df["close"].pct_change(periods=3)
+        df["momentum_fast"] = np.clip(df["momentum_fast"], -0.1, 0.1) * 10  # Scale to [-1, 1]
+
+        # Medium-term momentum
+        df["momentum_medium"] = df["close"].pct_change(periods=10)
+        df["momentum_medium"] = np.clip(df["momentum_medium"], -0.2, 0.2) * 5
+
+        # Long-term momentum
+        df["momentum_long"] = df["close"].pct_change(periods=30)
+        df["momentum_long"] = np.clip(df["momentum_long"], -0.3, 0.3) * 3.33
+
+        # Momentum alignment score (-3 to +3)
+        df["momentum_align"] = (
+            np.sign(df["momentum_fast"]) +
+            np.sign(df["momentum_medium"]) +
+            np.sign(df["momentum_long"])
+        ) / 3  # Normalize to [-1, 1]
+
+        for col in ["momentum_fast", "momentum_medium", "momentum_long", "momentum_align"]:
+            df[col] = df[col].fillna(0)
+
+        self.feature_names.extend(["momentum_fast", "momentum_medium", "momentum_long", "momentum_align"])
+
+        return df
+
     def _compute_atr(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
         """Helper: compute Average True Range"""
         high_low = df["high"] - df["low"]
@@ -255,7 +422,7 @@ class FeatureEngine:
         # Reset feature names
         self.feature_names = []
 
-        # Apply all feature computations
+        # ===== CORE FEATURES =====
         df = self.compute_returns(df)
         df = self.compute_volatility(df)
         df = self.compute_candle_features(df)
@@ -267,6 +434,14 @@ class FeatureEngine:
         df = self.compute_volatility_regime(df)
         df = self.compute_trend_strength(df)
         df = self.compute_microstructure_features(df)
+
+        # ===== NEW ADVANCED FEATURES =====
+        df = self.compute_rsi(df)              # RSI at multiple periods
+        df = self.compute_macd(df)             # MACD with histogram
+        df = self.compute_stochastic(df)       # Stochastic oscillator
+        df = self.compute_support_resistance(df)  # Support/Resistance
+        df = self.compute_order_flow_proxy(df)    # Order flow
+        df = self.compute_multi_timeframe_momentum(df)  # MTF momentum
 
         # Drop any remaining NaNs (from initial rolling windows)
         df = df.dropna().reset_index(drop=True)
@@ -297,38 +472,120 @@ def create_labels(
     threshold_multiplier: float = config.LABEL_THRESHOLD_MULTIPLIER
 ) -> pd.DataFrame:
     """
-    Create labels for supervised learning
+    Create labels for supervised learning - IMPROVED VERSION
 
-    Labels are based on future return relative to ATR (dynamic threshold)
-    - 0: NO TRADE (flat)
-    - 1: LONG (up)
-    - 2: SHORT (down)
+    Uses multiple factors for labeling:
+    1. Future return relative to ATR (dynamic threshold)
+    2. Risk/reward consideration
+    3. Maximum adverse excursion filtering
 
-    Args:
-        df: DataFrame with features
-        lookahead: How many candles forward to look
-        threshold_multiplier: Multiplier for ATR-based threshold
-
-    Returns:
-        DataFrame with 'label' column
+    Labels:
+    - 0: NO TRADE (flat or risky)
+    - 1: LONG (strong bullish)
+    - 2: SHORT (strong bearish)
     """
+    df = df.copy()
+
     # Compute ATR for dynamic thresholds
     atr = FeatureEngine()._compute_atr(df, period=14)
 
-    # Future return
-    future_return = (df["close"].shift(-lookahead) - df["close"]) / df["close"]
+    # Future prices
+    future_close = df["close"].shift(-lookahead)
+    future_high = df["high"].rolling(window=lookahead).max().shift(-lookahead)
+    future_low = df["low"].rolling(window=lookahead).min().shift(-lookahead)
+
+    # Returns
+    future_return = (future_close - df["close"]) / df["close"]
+
+    # Maximum favorable/adverse excursion
+    max_profit_long = (future_high - df["close"]) / df["close"]
+    max_loss_long = (df["close"] - future_low) / df["close"]
+    max_profit_short = (df["close"] - future_low) / df["close"]
+    max_loss_short = (future_high - df["close"]) / df["close"]
 
     # Dynamic threshold based on ATR
     threshold = (atr / df["close"]) * threshold_multiplier
 
-    # Assign labels
+    # Risk/reward ratio requirement (minimum 1.5)
+    min_risk_reward = 1.5
+
+    # ===== IMPROVED LABELING LOGIC =====
+
     df["label"] = 0  # default NO TRADE
 
-    df.loc[future_return > threshold, "label"] = 1  # LONG
-    df.loc[future_return < -threshold, "label"] = 2  # SHORT
+    # LONG conditions:
+    # 1. Positive return exceeds threshold
+    # 2. Max profit > Max loss (favorable risk/reward)
+    # 3. Return is positive (trade closed in profit)
+    long_condition = (
+        (future_return > threshold) &
+        (max_profit_long > max_loss_long * min_risk_reward) &
+        (future_return > 0)
+    )
 
-    # Drop rows where we can't compute future return (end of dataset)
+    # SHORT conditions:
+    # 1. Negative return exceeds threshold
+    # 2. Max profit > Max loss (favorable risk/reward)
+    # 3. Return is negative (trade closed in profit)
+    short_condition = (
+        (future_return < -threshold) &
+        (max_profit_short > max_loss_short * min_risk_reward) &
+        (future_return < 0)
+    )
+
+    df.loc[long_condition, "label"] = 1  # LONG
+    df.loc[short_condition, "label"] = 2  # SHORT
+
+    # Drop rows where we can't compute future (end of dataset)
     df = df.iloc[:-lookahead]
+
+    return df
+
+
+def create_labels_triple_barrier(
+    df: pd.DataFrame,
+    profit_take: float = 0.02,  # 2% profit target
+    stop_loss: float = 0.01,   # 1% stop loss
+    max_holding: int = 20      # Maximum holding period
+) -> pd.DataFrame:
+    """
+    Alternative: Triple barrier labeling method
+    Used by professional quant funds
+
+    Barriers:
+    1. Upper barrier (profit take)
+    2. Lower barrier (stop loss)
+    3. Time barrier (maximum holding period)
+
+    Label is based on which barrier is hit first
+    """
+    df = df.copy()
+    labels = np.zeros(len(df))
+
+    for i in range(len(df) - max_holding):
+        entry_price = df["close"].iloc[i]
+        upper_barrier = entry_price * (1 + profit_take)
+        lower_barrier = entry_price * (1 - stop_loss)
+
+        # Look forward
+        for j in range(1, max_holding + 1):
+            if i + j >= len(df):
+                break
+
+            high = df["high"].iloc[i + j]
+            low = df["low"].iloc[i + j]
+
+            # Check if barriers are hit
+            if high >= upper_barrier:
+                labels[i] = 1  # LONG (hit profit target)
+                break
+            elif low <= lower_barrier:
+                labels[i] = 2  # SHORT (hit stop loss = price went down)
+                break
+        # If no barrier hit, label stays 0 (NO TRADE)
+
+    df["label"] = labels.astype(int)
+    df = df.iloc[:-max_holding]
 
     return df
 

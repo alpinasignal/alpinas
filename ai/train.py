@@ -6,6 +6,7 @@ Professional ML training - no shortcuts
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import numpy as np
@@ -18,6 +19,42 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from loguru import logger
+
+
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for handling class imbalance
+    Focuses training on hard-to-classify examples
+    Paper: https://arxiv.org/abs/1708.02002
+    """
+
+    def __init__(self, alpha: torch.Tensor = None, gamma: float = 2.0, reduction: str = 'mean'):
+        """
+        Args:
+            alpha: Class weights tensor
+            gamma: Focusing parameter (higher = more focus on hard examples)
+            reduction: 'mean', 'sum', or 'none'
+        """
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            inputs: Logits [batch, num_classes]
+            targets: Class indices [batch]
+        """
+        ce_loss = F.cross_entropy(inputs, targets, weight=self.alpha, reduction='none')
+        pt = torch.exp(-ce_loss)  # Probability of correct class
+        focal_loss = ((1 - pt) ** self.gamma) * ce_loss
+
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        return focal_loss
 
 
 class EarlyStopping:
@@ -85,13 +122,14 @@ class Trainer:
         self.device = device
         self.learning_rate = learning_rate
 
-        # Loss function with class weights and label smoothing
+        # Loss function - Focal Loss for better class imbalance handling
         if class_weights is not None:
             class_weights = class_weights.to(device)
 
-        self.criterion = nn.CrossEntropyLoss(
-            weight=class_weights,
-            label_smoothing=config.LABEL_SMOOTHING  # Improved generalization
+        # Use Focal Loss for better handling of hard examples
+        self.criterion = FocalLoss(
+            alpha=class_weights,
+            gamma=2.0  # Focus on hard examples
         )
 
         # Optimizer with weight decay for regularization
