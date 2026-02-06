@@ -10,6 +10,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import numpy as np
+import pandas as pd
 from typing import Dict, Optional, Tuple
 from tqdm import tqdm
 import sys
@@ -19,6 +20,48 @@ from datetime import datetime
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 from loguru import logger
+
+
+def load_cached_data(symbol: str, timeframe: str) -> Optional[pd.DataFrame]:
+    """
+    Load data from cached CSV files (downloaded via download_data.py)
+    Much faster than downloading live!
+
+    Args:
+        symbol: e.g., "BTCUSDT"
+        timeframe: e.g., "1h"
+
+    Returns:
+        DataFrame with OHLCV data or None
+    """
+    # Convert symbol format: BTCUSDT -> BTCUSDT (no change needed for our format)
+    # But download_data.py saves as BTC/USDT -> BTCUSDT
+    filename = f"{symbol}_{timeframe}.csv"
+    filepath = os.path.join(config.DATA_DIR, filename)
+
+    if os.path.exists(filepath):
+        logger.info(f"Loading cached data from {filepath}")
+        df = pd.read_csv(filepath)
+
+        # Ensure correct column names
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+        # Rename columns if needed (ccxt format)
+        column_mapping = {
+            'timestamp': 'timestamp',
+            'open': 'open',
+            'high': 'high',
+            'low': 'low',
+            'close': 'close',
+            'volume': 'volume'
+        }
+
+        logger.info(f"Loaded {len(df)} candles from cache")
+        return df
+    else:
+        logger.warning(f"Cached data not found: {filepath}")
+        return None
 
 
 class FocalLoss(nn.Module):
@@ -339,17 +382,22 @@ def train_model(
     Returns:
         Trained model
     """
-    from data.market import BinanceDataFetcher
     from data.features import FeatureEngine, create_labels
     from data.datasets import create_dataloaders, get_class_weights
     from ai.model import create_model
 
     logger.info(f"Training model for {symbol} {timeframe}")
 
-    # Load data
-    logger.info("Loading market data...")
-    fetcher = BinanceDataFetcher()
-    df = fetcher.fetch_or_load(symbol, timeframe)
+    # Try to load from cache first (MUCH FASTER!)
+    logger.info("Loading market data from cache...")
+    df = load_cached_data(symbol, timeframe)
+
+    # Fallback to live download if cache not available
+    if df is None:
+        logger.info("Cache not found, trying live download...")
+        from data.market import BinanceDataFetcher
+        fetcher = BinanceDataFetcher()
+        df = fetcher.fetch_or_load(symbol, timeframe)
 
     if df is None:
         logger.error(f"Failed to load data for {symbol} {timeframe}")

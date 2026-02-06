@@ -213,19 +213,19 @@ class DatabaseManager:
             Base.metadata.create_all(self.engine)
             self.SessionLocal = sessionmaker(bind=self.engine)
 
-            # Verify schema
+            # Verify schema - DO NOT DROP TABLES, just verify connection
             session = self.SessionLocal()
             try:
-                session.query(User).limit(1).all()
+                # Simple connection test - don't drop tables on error!
+                session.execute(text("SELECT 1"))
                 session.close()
-                logger.info("Database schema verified OK")
+                logger.info("Database connection verified OK")
             except Exception as schema_error:
                 session.close()
-                logger.warning(f"Schema mismatch: {schema_error}")
-                logger.info("Recreating tables...")
-                Base.metadata.drop_all(self.engine)
-                Base.metadata.create_all(self.engine)
-                logger.info("Tables recreated successfully")
+                logger.warning(f"Database query failed: {schema_error}")
+                # DO NOT drop tables - this deletes all user data!
+                # Just log the error and continue
+                logger.warning("Continuing without schema verification")
 
             self._initialized = True
             logger.info("✓ Database initialized successfully")
@@ -328,7 +328,17 @@ class SubscriptionManager:
                 session.close()
 
     def _create_free_subscription(self, session: Session, user_id: int):
-        """Create free tier subscription"""
+        """Create free tier subscription only if none exists"""
+        # Check if subscription already exists for this user
+        existing = session.query(Subscription).filter(
+            Subscription.user_id == user_id,
+            Subscription.is_active == True
+        ).first()
+
+        if existing:
+            logger.info(f"User {user_id} already has active subscription, skipping creation")
+            return
+
         free_tier = config.SUBSCRIPTION_TIERS["free"]
 
         subscription = Subscription(
@@ -341,6 +351,7 @@ class SubscriptionManager:
 
         session.add(subscription)
         session.commit()
+        logger.info(f"Created free subscription for user {user_id}")
 
     def get_subscription(self, user_id: int) -> Optional[Subscription]:
         """Get active subscription for user"""
