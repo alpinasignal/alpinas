@@ -52,8 +52,9 @@ class SignalGenerator:
             features = features.to(self.device)
 
             # Use temperature scaling for calibrated probabilities
-            # Temperature > 1 gives more conservative (less overconfident) predictions
-            temperature = 1.15  # Slightly smoothed for better calibration
+            # Temperature < 1 gives sharper (more confident) predictions
+            # Temperature > 1 gives more conservative predictions
+            temperature = 0.7  # Sharper predictions for clearer signals
             probabilities = self.model.predict_proba(features, temperature=temperature)
             probabilities = probabilities.cpu().numpy()
 
