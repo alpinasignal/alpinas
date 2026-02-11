@@ -53,9 +53,11 @@ def retrain_all_models():
                 model_filename = f"{symbol}_{timeframe}_{config.MODEL_TYPE}.pt"
                 model_path = os.path.join(config.MODELS_DIR, model_filename)
 
-                # Backup old model
+                # Backup old model (delete old backup if exists)
                 if os.path.exists(model_path):
                     backup_path = model_path.replace(".pt", "_backup.pt")
+                    if os.path.exists(backup_path):
+                        os.remove(backup_path)
                     os.rename(model_path, backup_path)
                     logger.info(f"Backed up old model to {backup_path}")
 

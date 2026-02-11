@@ -435,14 +435,13 @@ class FeatureEngine:
         df = self.compute_trend_strength(df)
         df = self.compute_microstructure_features(df)
 
-        # ===== NEW ADVANCED FEATURES =====
-        # TEMPORARILY DISABLED - enable after retraining models locally
-        # df = self.compute_rsi(df)              # RSI at multiple periods
-        # df = self.compute_macd(df)             # MACD with histogram
-        # df = self.compute_stochastic(df)       # Stochastic oscillator
-        # df = self.compute_support_resistance(df)  # Support/Resistance
-        # df = self.compute_order_flow_proxy(df)    # Order flow
-        # df = self.compute_multi_timeframe_momentum(df)  # MTF momentum
+        # ===== ADVANCED TECHNICAL INDICATORS =====
+        df = self.compute_rsi(df)              # RSI at multiple periods
+        df = self.compute_macd(df)             # MACD with histogram
+        df = self.compute_stochastic(df)       # Stochastic oscillator
+        df = self.compute_support_resistance(df)  # Support/Resistance
+        df = self.compute_order_flow_proxy(df)    # Order flow
+        df = self.compute_multi_timeframe_momentum(df)  # MTF momentum
 
         # Drop any remaining NaNs (from initial rolling windows)
         df = df.dropna().reset_index(drop=True)

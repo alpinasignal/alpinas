@@ -44,7 +44,7 @@ BINANCE_FUTURES_URL = "https://fapi.binance.com"
 # ========================
 
 # Sequence length for neural network input
-SEQUENCE_LENGTH = 32  # 32 candles as context (optimized for CPU)
+SEQUENCE_LENGTH = 48  # 48 candles for more context (was 32)
 
 # Feature windows for rolling calculations
 VOLATILITY_WINDOWS = [10, 20, 50]
@@ -56,19 +56,19 @@ ATR_PERIOD = 14
 # NEURAL NETWORK
 # ========================
 
-# Model architecture - MATCHES EXISTING TRAINED MODELS
+# Model architecture - IMPROVED for better accuracy
 MODEL_TYPE = "transformer"  # "transformer" or "lstm"
-HIDDEN_DIM = 64  # Must match trained models
-NUM_LAYERS = 2  # Must match trained models
-NUM_HEADS = 4  # Must match trained models
-DROPOUT = 0.2  # Must match trained models
+HIDDEN_DIM = 128  # Increased from 64 for more capacity
+NUM_LAYERS = 3  # Increased from 2 for deeper learning
+NUM_HEADS = 8  # Increased from 4 for better attention
+DROPOUT = 0.3  # Increased slightly to prevent overfitting
 NUM_CLASSES = 3  # NO TRADE, LONG, SHORT
 
-# Training configuration
-BATCH_SIZE = 128
-LEARNING_RATE = 0.001
-MAX_EPOCHS = 30
-EARLY_STOPPING_PATIENCE = 7
+# Training configuration - IMPROVED
+BATCH_SIZE = 64  # Smaller batches for better generalization
+LEARNING_RATE = 0.0005  # Lower LR for more stable training
+MAX_EPOCHS = 50  # More epochs to learn patterns
+EARLY_STOPPING_PATIENCE = 10  # More patience
 VALIDATION_SPLIT = 0.15
 LABEL_SMOOTHING = 0.1
 
