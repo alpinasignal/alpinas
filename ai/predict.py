@@ -54,7 +54,7 @@ class SignalGenerator:
             # Use temperature scaling for calibrated probabilities
             # Temperature < 1 gives sharper (more confident) predictions
             # Temperature > 1 gives more conservative predictions
-            temperature = 0.3  # Sharp predictions for clear high-confidence signals
+            temperature = 0.7  # Balanced: confident but not overconfident
             probabilities = self.model.predict_proba(features, temperature=temperature)
             probabilities = probabilities.cpu().numpy()
 
