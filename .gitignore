@@ -81,6 +81,8 @@ docs/_build/
 # Backup files
 *.bak
 *.backup
+*_backup.pt
+nul
 
 # System files
 .directory
