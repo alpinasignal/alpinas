@@ -54,7 +54,7 @@ class SignalGenerator:
             # Use temperature scaling for calibrated probabilities
             # Temperature < 1 gives sharper (more confident) predictions
             # Temperature > 1 gives more conservative predictions
-            temperature = 0.7  # Sharper predictions for clearer signals
+            temperature = 0.3  # Sharp predictions for clear high-confidence signals
             probabilities = self.model.predict_proba(features, temperature=temperature)
             probabilities = probabilities.cpu().numpy()
 
@@ -112,9 +112,12 @@ class SignalGenerator:
         - If NO_TRADE has highest prob → NO TRADE
 
         Signal strength based on confidence:
-        - Strong: >60%
-        - Moderate: 45-60%
-        - Weak: <45%
+        - Strong: >80%
+        - Moderate: 65-80%
+        - Weak: <65%
+
+        Confidence = relative strength of signal vs opposite direction
+        (LONG vs SHORT comparison, ignoring NO_TRADE)
         """
         prob_no_trade = probabilities[0]
         prob_long = probabilities[1]
@@ -129,16 +132,26 @@ class SignalGenerator:
         max_prob = max(probabilities)
         max_idx = int(np.argmax(probabilities))
 
+        # Calculate relative confidence: LONG vs SHORT (excluding NO_TRADE)
+        # This gives a more intuitive confidence score (70-95% range)
+        directional_total = prob_long + prob_short
+        if directional_total > 0:
+            relative_long = prob_long / directional_total
+            relative_short = prob_short / directional_total
+        else:
+            relative_long = 0.5
+            relative_short = 0.5
+
         # Determine signal based on highest probability
         if max_idx == 1:  # LONG has highest probability
             signal = "LONG"
             signal_class = 1
-            confidence = prob_long * 100
+            confidence = relative_long * 100
 
             # Determine strength
-            if prob_long >= 0.60:
+            if confidence >= 80:
                 reason = "Strong bullish signal" + vol_warning
-            elif prob_long >= 0.45:
+            elif confidence >= 65:
                 reason = "Moderate bullish signal" + vol_warning
             else:
                 reason = "Weak bullish tendency" + vol_warning
@@ -146,26 +159,26 @@ class SignalGenerator:
         elif max_idx == 2:  # SHORT has highest probability
             signal = "SHORT"
             signal_class = 2
-            confidence = prob_short * 100
+            confidence = relative_short * 100
 
-            if prob_short >= 0.60:
+            if confidence >= 80:
                 reason = "Strong bearish signal" + vol_warning
-            elif prob_short >= 0.45:
+            elif confidence >= 65:
                 reason = "Moderate bearish signal" + vol_warning
             else:
                 reason = "Weak bearish tendency" + vol_warning
 
         else:  # NO_TRADE has highest probability (or equal)
-            # Check if LONG or SHORT is close (within 5%)
+            # Check if LONG or SHORT is close
             if prob_long > prob_short and (prob_no_trade - prob_long) < 0.10:
                 signal = "LONG"
                 signal_class = 1
-                confidence = prob_long * 100
+                confidence = relative_long * 100
                 reason = "Slight bullish bias - wait for confirmation" + vol_warning
             elif prob_short > prob_long and (prob_no_trade - prob_short) < 0.10:
                 signal = "SHORT"
                 signal_class = 2
-                confidence = prob_short * 100
+                confidence = relative_short * 100
                 reason = "Slight bearish bias - wait for confirmation" + vol_warning
             else:
                 signal = "NO TRADE"
