@@ -56,7 +56,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Check if user is admin
 function isAdmin() {
-    return ADMIN_IDS.includes(userId);
+    return ADMIN_IDS.includes(Number(userId));
 }
 
 // Apply admin UI (safe to call multiple times)
@@ -113,9 +113,9 @@ function applyUserInfo(telegramUser, usernameEl, userIdEl) {
             console.log('✅ Generic user name set');
         }
 
-        // Update user ID
+        // Update user ID (ensure it's a number for admin check)
         userIdEl.textContent = telegramUser.id;
-        userId = telegramUser.id;
+        userId = Number(telegramUser.id);
         console.log('✅ User ID set:', userId);
 
         // Apply admin UI if this user is admin
