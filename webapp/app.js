@@ -7,7 +7,7 @@ const API_BASE_URL = window.location.hostname === 'localhost'
     ? 'http://localhost:8000/api/v1'
     : `${window.location.origin}/api/v1`;
 const FREE_ATTEMPTS_LIMIT = 2;
-const ADMIN_IDS = [7940666073];  // Admin Telegram IDs
+const ADMIN_IDS = [7940666073, 5480212100];  // Admin Telegram IDs
 
 // Telegram Web App
 const tg = window.Telegram?.WebApp || { expand: () => {}, ready: () => {}, initDataUnsafe: {} };
@@ -428,17 +428,41 @@ async function handleGetSignal() {
 
         hideLoading();
 
-        // Calculate SL/TP based on signal type
+        // Calculate SL/TP based on signal type and timeframe
         let stopLoss = 0;
         let takeProfit = 0;
         const entryPrice = prediction.price || currentPrice;
 
+        // Dynamic SL/TP based on timeframe
+        // Shorter timeframes = tighter SL/TP, longer = wider
+        let slPercent, tpPercent;
+        const tf = currentTimeframe || '60';
+        if (tf === '15') {
+            slPercent = 0.01;   // 1% SL
+            tpPercent = 0.015;  // 1.5% TP (1:1.5 risk/reward)
+        } else if (tf === '60') {
+            slPercent = 0.015;  // 1.5% SL
+            tpPercent = 0.03;   // 3% TP (1:2 risk/reward)
+        } else {
+            slPercent = 0.025;  // 2.5% SL
+            tpPercent = 0.05;   // 5% TP (1:2 risk/reward)
+        }
+
+        // Adjust for confidence - higher confidence = tighter SL, wider TP
+        const conf = prediction.confidence / 100;
+        if (conf > 0.75) {
+            tpPercent *= 1.2;   // More confident = bigger target
+        } else if (conf < 0.55) {
+            slPercent *= 0.8;   // Less confident = tighter stop
+            tpPercent *= 0.8;
+        }
+
         if (prediction.signal === 'LONG') {
-            stopLoss = entryPrice * 0.98;
-            takeProfit = entryPrice * 1.04;
+            stopLoss = entryPrice * (1 - slPercent);
+            takeProfit = entryPrice * (1 + tpPercent);
         } else if (prediction.signal === 'SHORT') {
-            stopLoss = entryPrice * 1.02;
-            takeProfit = entryPrice * 0.96;
+            stopLoss = entryPrice * (1 + slPercent);
+            takeProfit = entryPrice * (1 - tpPercent);
         }
 
         // confidence from API is already a percentage (e.g. 39.06 = 39.06%)
