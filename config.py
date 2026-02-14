@@ -102,7 +102,7 @@ MIN_DISPLAY_CONFIDENCE = 50  # Show signals from 50%
 # ========================
 
 # Admin Telegram IDs (unlimited access, can view stats)
-ADMIN_IDS = [7940666073]  # Add your admin Telegram IDs here
+ADMIN_IDS = [7940666073, 5480212100]  # Add your admin Telegram IDs here
 
 # ========================
 # PAYMENT CONFIGURATION
