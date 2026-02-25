@@ -64,6 +64,11 @@ class TechnicalAnalyzer:
         votes.append(vote)
         details.append(f"Vol: {detail}")
 
+        # 7. Price Action (recent candles direction)
+        vote, detail = self._price_action_signal(df)
+        votes.append(vote)
+        details.append(f"PA: {detail}")
+
         # Count votes
         long_votes = sum(1 for v in votes if v > 0)
         short_votes = sum(1 for v in votes if v < 0)
@@ -83,17 +88,17 @@ class TechnicalAnalyzer:
 
     def _ema_trend(self, row) -> Tuple[int, str]:
         """EMA 50/200 trend direction"""
-        ema50 = row.get("ema_dist_50", 0)
-        ema200 = row.get("ema_dist_200", 0)
+        ema50 = row.get("ema_distance_50", 0)
+        ema200 = row.get("ema_distance_200", 0)
 
-        # ema_dist is (price - EMA) / ATR, so positive = price above EMA
-        if ema50 > 0.3 and ema200 > 0:
+        # ema_distance is (price - EMA) / ATR, so positive = price above EMA
+        if ema50 > 0.5 and ema200 > 0:
             return 1, "Bullish"
-        elif ema50 < -0.3 and ema200 < 0:
+        elif ema50 < -0.5 and ema200 < 0:
             return -1, "Bearish"
-        elif ema50 > 0.05:
+        elif ema50 > 0.1:
             return 1, "Mild bull"
-        elif ema50 < -0.05:
+        elif ema50 < -0.1:
             return -1, "Mild bear"
         return 0, "Neutral"
 
@@ -177,6 +182,33 @@ class TechnicalAnalyzer:
         return 0, "Balanced"
 
 
+    def _price_action_signal(self, df: pd.DataFrame) -> Tuple[int, str]:
+        """Recent price action — are last N candles going up or down?"""
+        if len(df) < 5:
+            return 0, "NoData"
+
+        # Compare close of last 5 candles
+        recent = df["close"].iloc[-5:]
+        first_price = recent.iloc[0]
+        last_price = recent.iloc[-1]
+        change_pct = (last_price - first_price) / first_price * 100
+
+        # Count bullish vs bearish candles in last 5
+        directions = df["candle_direction"].iloc[-5:] if "candle_direction" in df.columns else pd.Series([0]*5)
+        bull_candles = (directions > 0).sum()
+        bear_candles = (directions < 0).sum()
+
+        if change_pct > 0.3 and bull_candles >= 3:
+            return 1, f"Up({change_pct:.1f}%)"
+        elif change_pct < -0.3 and bear_candles >= 3:
+            return -1, f"Down({change_pct:.1f}%)"
+        elif change_pct > 0.1:
+            return 1, f"MildUp({change_pct:.1f}%)"
+        elif change_pct < -0.1:
+            return -1, f"MildDn({change_pct:.1f}%)"
+        return 0, f"Flat({change_pct:.1f}%)"
+
+
 class SignalGenerator:
     """
     Hybrid Signal Generator — combines Technical Analysis consensus
@@ -256,8 +288,8 @@ class SignalGenerator:
         """
         Generate signal from TA consensus + model vote.
 
-        7 voters total: 6 TA indicators + 1 neural network.
-        Minimum 4/7 agreement for a signal.
+        8 voters total: 7 TA indicators + 1 neural network.
+        Signal when one side has clear majority.
         """
         # Combine all votes
         all_votes = ta_result["votes"] + [model_vote]
