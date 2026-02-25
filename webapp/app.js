@@ -331,46 +331,48 @@ function openSupport() {
     }
 }
 
-// Load attempts from localStorage
+// Load attempts from localStorage (permanent, not daily reset)
 function loadAttempts() {
-    const stored = localStorage.getItem('alpina_attempts');
+    const stored = localStorage.getItem('alpina_attempts_total');
     if (stored) {
         const data = JSON.parse(stored);
-        const today = new Date().toDateString();
-
-        if (data.date === today) {
-            attemptsUsed = data.count;
-        } else {
-            // Reset if new day
-            attemptsUsed = 0;
-            saveAttempts();
-        }
+        attemptsUsed = data.count || 0;
     }
     updateAttemptsDisplay();
 }
 
-// Save attempts to localStorage
+// Save attempts to localStorage (permanent)
 function saveAttempts() {
     const data = {
-        count: attemptsUsed,
-        date: new Date().toDateString()
+        count: attemptsUsed
     };
-    localStorage.setItem('alpina_attempts', JSON.stringify(data));
+    localStorage.setItem('alpina_attempts_total', JSON.stringify(data));
 }
 
 // Update attempts display
 function updateAttemptsDisplay() {
     const el = document.getElementById('attemptsCount');
-    if (!el) return; // Admin mode - attemptsCount element was replaced
-    const attemptsLeft = FREE_ATTEMPTS_LIMIT - attemptsUsed;
-    el.textContent = `${attemptsLeft} / ${FREE_ATTEMPTS_LIMIT}`;
+    if (!el) return;
+    if (hasSubscription()) {
+        const banner = document.querySelector('.attempts-banner span');
+        if (banner) banner.innerHTML = '⭐ <strong>Subscribed - Unlimited</strong>';
+        el.textContent = 'Unlimited';
+    } else {
+        const attemptsLeft = Math.max(0, FREE_ATTEMPTS_LIMIT - attemptsUsed);
+        el.textContent = `${attemptsLeft} / ${FREE_ATTEMPTS_LIMIT}`;
+    }
+}
+
+// Check if user has active subscription
+function hasSubscription() {
+    return localStorage.getItem('alpina_subscribed') === 'true';
 }
 
 // Handle Get Signal button
 async function handleGetSignal() {
-    // Skip limit check for admins
-    if (!isAdmin()) {
-        // Check if user has attempts left
+    // Skip limit check for admins and subscribers
+    if (!isAdmin() && !hasSubscription()) {
+        // Check if user has free attempts left
         if (attemptsUsed >= FREE_ATTEMPTS_LIMIT) {
             showSubscriptionModal();
             return;
@@ -485,8 +487,8 @@ async function handleGetSignal() {
             localStorage.setItem('alpina_signal_history', JSON.stringify(signalHistory));
         }
 
-        // Increment attempts (only for non-admins, and only for real signals - NOT for NO TRADE)
-        if (!isAdmin() && prediction.signal !== 'NO TRADE') {
+        // Increment attempts (only for free users, not admins/subscribers)
+        if (!isAdmin() && !hasSubscription() && prediction.signal !== 'NO TRADE') {
             attemptsUsed++;
             saveAttempts();
             updateAttemptsDisplay();
@@ -718,9 +720,8 @@ async function checkPayment() {
             // Payment verified - activate subscription
             alert('🎉 Payment verified!\n\nYour subscription is now active.\nThank you!');
 
-            // Reset attempts (give unlimited)
-            attemptsUsed = 0;
-            saveAttempts();
+            // Mark as subscribed (unlimited access)
+            localStorage.setItem('alpina_subscribed', 'true');
             updateAttemptsDisplay();
 
             // Close modal
