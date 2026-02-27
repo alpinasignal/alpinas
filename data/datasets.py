@@ -115,12 +115,13 @@ def create_dataloaders(
     )
 
     # Create dataloaders
+    use_pin_memory = torch.cuda.is_available()
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,  # shuffle within training set
         num_workers=0,  # set to 0 for Windows compatibility
-        pin_memory=True
+        pin_memory=use_pin_memory
     )
 
     val_loader = DataLoader(
@@ -128,10 +129,69 @@ def create_dataloaders(
         batch_size=batch_size,
         shuffle=False,
         num_workers=0,
-        pin_memory=True
+        pin_memory=use_pin_memory
     )
 
     return train_loader, val_loader
+
+
+def create_walk_forward_splits(
+    df: pd.DataFrame,
+    feature_cols: list,
+    n_splits: int = config.WALK_FORWARD_SPLITS,
+    min_train_pct: float = config.MIN_TRAIN_PCT,
+    batch_size: int = config.BATCH_SIZE,
+    sequence_length: int = config.SEQUENCE_LENGTH
+) -> list:
+    """
+    Create expanding window walk-forward splits for proper time-series validation.
+
+    Returns list of (train_loader, val_loader, fold_info) tuples.
+    Each fold uses more training data: [50/10], [60/10], [70/10], [80/10], [90/10]
+    """
+    total_len = len(df)
+    # Each validation fold is ~10% of data
+    val_size = total_len // (n_splits + 1)
+    splits = []
+
+    for i in range(n_splits):
+        # Training end = min_train_pct + i * step
+        train_end_pct = min_train_pct + i * ((1.0 - min_train_pct - 0.1) / max(n_splits - 1, 1))
+        train_end = int(total_len * train_end_pct)
+        val_end = min(train_end + val_size, total_len)
+
+        if val_end <= train_end or train_end < sequence_length * 2:
+            continue
+
+        train_df = df.iloc[:train_end].reset_index(drop=True)
+        val_df = df.iloc[train_end:val_end].reset_index(drop=True)
+
+        if len(val_df) < sequence_length + 10:
+            continue
+
+        train_dataset = CryptoSequenceDataset(train_df, feature_cols, sequence_length)
+        val_dataset = CryptoSequenceDataset(val_df, feature_cols, sequence_length)
+
+        use_pin = torch.cuda.is_available()
+        train_loader = DataLoader(
+            train_dataset, batch_size=batch_size, shuffle=True,
+            num_workers=0, pin_memory=use_pin
+        )
+        val_loader = DataLoader(
+            val_dataset, batch_size=batch_size, shuffle=False,
+            num_workers=0, pin_memory=use_pin
+        )
+
+        fold_info = {
+            "fold": i + 1,
+            "train_size": len(train_df),
+            "val_size": len(val_df),
+            "train_pct": f"{train_end_pct:.0%}",
+        }
+
+        splits.append((train_loader, val_loader, fold_info))
+
+    return splits
 
 
 def get_class_weights(df: pd.DataFrame, label_col: str = "label") -> torch.Tensor:

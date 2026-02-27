@@ -52,6 +52,21 @@ MOMENTUM_WINDOWS = [5, 10, 20, 50]
 EMA_PERIODS = [50, 200]
 ATR_PERIOD = 14
 
+# BTC correlation
+BTC_CORRELATION_WINDOW = 20
+
+# Market structure
+REGRESSION_SLOPE_WINDOW = 20
+HH_LL_LOOKBACK = 20
+
+# Walk-forward validation
+WALK_FORWARD_SPLITS = 5
+MIN_TRAIN_PCT = 0.5
+
+# ATR-based SL/TP
+SL_ATR_MULTIPLIER = 1.5
+TP_ATR_MULTIPLIER = 2.5
+
 # ========================
 # NEURAL NETWORK
 # ========================
@@ -65,10 +80,11 @@ DROPOUT = 0.3  # Increased slightly to prevent overfitting
 NUM_CLASSES = 3  # NO TRADE, LONG, SHORT
 
 # Training configuration - IMPROVED
-BATCH_SIZE = 64  # Smaller batches for better generalization
+BATCH_SIZE = 256  # Larger batches for faster CPU training
 LEARNING_RATE = 0.0005  # Lower LR for more stable training
-MAX_EPOCHS = 50  # More epochs to learn patterns
-EARLY_STOPPING_PATIENCE = 10  # More patience
+MAX_EPOCHS = 25  # Enough epochs with early stopping
+EARLY_STOPPING_PATIENCE = 7  # Balanced patience
+MAX_TRAINING_CANDLES = 25000  # Cap data size for speed (most recent candles)
 VALIDATION_SPLIT = 0.15
 LABEL_SMOOTHING = 0.1
 

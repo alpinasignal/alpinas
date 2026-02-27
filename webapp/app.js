@@ -430,41 +430,30 @@ async function handleGetSignal() {
 
         hideLoading();
 
-        // Calculate SL/TP based on signal type and timeframe
+        // Use server-provided ATR-based SL/TP (preferred) or fallback to client calculation
+        const entryPrice = prediction.price || currentPrice;
         let stopLoss = 0;
         let takeProfit = 0;
-        const entryPrice = prediction.price || currentPrice;
 
-        // Dynamic SL/TP based on timeframe
-        // Shorter timeframes = tighter SL/TP, longer = wider
-        let slPercent, tpPercent;
-        const tf = currentTimeframe || '60';
-        if (tf === '15') {
-            slPercent = 0.01;   // 1% SL
-            tpPercent = 0.015;  // 1.5% TP (1:1.5 risk/reward)
-        } else if (tf === '60') {
-            slPercent = 0.015;  // 1.5% SL
-            tpPercent = 0.03;   // 3% TP (1:2 risk/reward)
-        } else {
-            slPercent = 0.025;  // 2.5% SL
-            tpPercent = 0.05;   // 5% TP (1:2 risk/reward)
-        }
+        if (prediction.stop_loss && prediction.take_profit && prediction.stop_loss > 0) {
+            // Server provided ATR-based SL/TP — use directly
+            stopLoss = prediction.stop_loss;
+            takeProfit = prediction.take_profit;
+        } else if (prediction.signal === 'LONG' || prediction.signal === 'SHORT') {
+            // Fallback: client-side percentage-based SL/TP
+            let slPercent, tpPercent;
+            const tf = currentTimeframe || '60';
+            if (tf === '15') { slPercent = 0.01; tpPercent = 0.015; }
+            else if (tf === '60') { slPercent = 0.015; tpPercent = 0.03; }
+            else { slPercent = 0.025; tpPercent = 0.05; }
 
-        // Adjust for confidence - higher confidence = tighter SL, wider TP
-        const conf = prediction.confidence / 100;
-        if (conf > 0.75) {
-            tpPercent *= 1.2;   // More confident = bigger target
-        } else if (conf < 0.55) {
-            slPercent *= 0.8;   // Less confident = tighter stop
-            tpPercent *= 0.8;
-        }
-
-        if (prediction.signal === 'LONG') {
-            stopLoss = entryPrice * (1 - slPercent);
-            takeProfit = entryPrice * (1 + tpPercent);
-        } else if (prediction.signal === 'SHORT') {
-            stopLoss = entryPrice * (1 + slPercent);
-            takeProfit = entryPrice * (1 - tpPercent);
+            if (prediction.signal === 'LONG') {
+                stopLoss = entryPrice * (1 - slPercent);
+                takeProfit = entryPrice * (1 + tpPercent);
+            } else {
+                stopLoss = entryPrice * (1 + slPercent);
+                takeProfit = entryPrice * (1 - tpPercent);
+            }
         }
 
         // confidence from API is already a percentage (e.g. 39.06 = 39.06%)

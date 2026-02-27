@@ -380,6 +380,15 @@ class BinanceDataFetcher:
         return df
 
 
+def fetch_btc_data(timeframe: str, num_candles: int = 500) -> Optional[pd.DataFrame]:
+    """
+    Fetch BTC data for correlation computation.
+    Used by both training and inference pipelines.
+    """
+    fetcher = BinanceDataFetcher()
+    return fetcher.fetch_latest_candles("BTCUSDT", timeframe, num_candles=num_candles)
+
+
 def download_all_data():
     """Download historical data for all supported pairs and timeframes"""
     fetcher = BinanceDataFetcher()

@@ -211,21 +211,29 @@ class TechnicalAnalyzer:
 
 class SignalGenerator:
     """
-    Hybrid Signal Generator — combines Technical Analysis consensus
-    with neural network predictions for accurate trading signals.
+    Hybrid Signal Generator v2 — combines Technical Analysis consensus
+    with neural network + ensemble + regime + meta-model for accurate signals.
     """
 
     def __init__(
         self,
         model: torch.nn.Module,
         feature_names: list,
-        device: str = "cuda" if torch.cuda.is_available() else "cpu"
+        device: str = "cuda" if torch.cuda.is_available() else "cpu",
+        ensemble_manager=None,
+        regime_detector=None,
+        meta_model_inst=None,
+        calibrator=None,
     ):
         self.model = model
         self.feature_names = feature_names
         self.device = device
         self.model.eval()
         self.ta = TechnicalAnalyzer()
+        self.ensemble = ensemble_manager
+        self.regime = regime_detector
+        self.meta_model_inst = meta_model_inst
+        self.calibrator = calibrator
 
     def predict_probabilities(self, features: torch.Tensor) -> np.ndarray:
         """Get probability distribution from model"""
@@ -283,18 +291,27 @@ class SignalGenerator:
         ta_result: Dict,
         model_vote: int,
         model_detail: str,
-        volatility_percentile: float
+        volatility_percentile: float,
+        extra_votes: List = None,
+        extra_details: List = None
     ) -> Dict:
         """
-        Generate signal from TA consensus + model vote.
+        Generate signal from TA consensus + model vote + ensemble votes.
 
-        8 voters total: 7 TA indicators + 1 neural network.
+        Base: 7 TA indicators + 1 neural network = 8 voters.
+        With ensemble: + ensemble vote + meta-model vote = up to 10 voters.
         Signal when one side has clear majority.
         """
         # Combine all votes
         all_votes = ta_result["votes"] + [model_vote]
         all_details = ta_result["details"] + [model_detail]
-        total = len(all_votes)  # 7
+
+        if extra_votes:
+            all_votes.extend(extra_votes)
+        if extra_details:
+            all_details.extend(extra_details)
+
+        total = len(all_votes)
 
         long_votes = sum(1 for v in all_votes if v > 0)
         short_votes = sum(1 for v in all_votes if v < 0)
@@ -367,6 +384,84 @@ class SignalGenerator:
             "reason": reason
         }
 
+    def get_higher_tf_bias(self, symbol: str, timeframe: str) -> Dict:
+        """
+        Get 4H timeframe bias for multi-timeframe hierarchy.
+        Only applies when predicting 15m or 1h.
+        Returns: {"direction": "LONG"/"SHORT"/"NEUTRAL", "strength": int, "veto": bool}
+        """
+        if timeframe == "4h":
+            return {"direction": "NEUTRAL", "strength": 0, "veto": False}
+
+        try:
+            from data.market import BinanceDataFetcher
+            from data.features import FeatureEngine
+
+            fetcher = BinanceDataFetcher()
+            df_4h = fetcher.fetch_latest_candles(
+                symbol, "4h", num_candles=config.SEQUENCE_LENGTH + 200
+            )
+
+            if df_4h is None or len(df_4h) < 50:
+                return {"direction": "NEUTRAL", "strength": 0, "veto": False}
+
+            # Compute features for 4H
+            engine = FeatureEngine()
+            df_4h = engine.create_all_features(df_4h, symbol=symbol)
+
+            # Run TA analysis on 4H
+            ta_4h = self.ta.analyze(df_4h)
+            long_v = ta_4h["long_votes"]
+            short_v = ta_4h["short_votes"]
+
+            if long_v >= 5:
+                direction = "LONG"
+            elif short_v >= 5:
+                direction = "SHORT"
+            elif long_v > short_v:
+                direction = "LONG"
+            elif short_v > long_v:
+                direction = "SHORT"
+            else:
+                direction = "NEUTRAL"
+
+            strength = max(long_v, short_v)
+            # Veto if 4H strongly opposes (6+ votes in opposite direction)
+            veto = strength >= 6
+
+            logger.info(f"4H bias for {symbol}: {direction} (L={long_v}, S={short_v}, veto={veto})")
+            return {"direction": direction, "strength": strength, "veto": veto}
+
+        except Exception as e:
+            logger.warning(f"Could not get 4H bias: {e}")
+            return {"direction": "NEUTRAL", "strength": 0, "veto": False}
+
+    def compute_atr_sl_tp(self, df: pd.DataFrame, signal: str, current_price: float) -> Dict:
+        """
+        Compute ATR-based Stop Loss and Take Profit levels.
+        """
+        atr_norm = df["atr_norm"].iloc[-1] if "atr_norm" in df.columns else 0.02
+        atr_price = atr_norm * current_price  # ATR in price units
+
+        sl_mult = config.SL_ATR_MULTIPLIER
+        tp_mult = config.TP_ATR_MULTIPLIER
+
+        if signal == "LONG":
+            stop_loss = current_price - (sl_mult * atr_price)
+            take_profit = current_price + (tp_mult * atr_price)
+        elif signal == "SHORT":
+            stop_loss = current_price + (sl_mult * atr_price)
+            take_profit = current_price - (tp_mult * atr_price)
+        else:
+            stop_loss = 0
+            take_profit = 0
+
+        return {
+            "stop_loss": round(float(stop_loss), 6),
+            "take_profit": round(float(take_profit), 6),
+            "atr_value": round(float(atr_price), 6)
+        }
+
     def predict_symbol(
         self,
         df: pd.DataFrame,
@@ -374,7 +469,7 @@ class SignalGenerator:
         timeframe: str
     ) -> Dict:
         """
-        Generate prediction using hybrid TA + model consensus.
+        Generate prediction using hybrid TA + model consensus + MTF hierarchy.
         """
         # Check we have enough data
         if len(df) < config.SEQUENCE_LENGTH:
@@ -395,23 +490,105 @@ class SignalGenerator:
         feature_array = feature_df.values.astype(np.float32)
         feature_tensor = torch.from_numpy(feature_array)
         probabilities = self.predict_probabilities(feature_tensor)
+
+        # Calibrate if calibrator available
+        if self.calibrator is not None:
+            probabilities = self.calibrator.calibrate(probabilities)
+
         model_vote, model_detail = self.get_model_vote(probabilities)
 
         logger.info(f"{symbol} {timeframe} NN raw: NO_TRADE={probabilities[0]:.3f}, LONG={probabilities[1]:.3f}, SHORT={probabilities[2]:.3f}")
+
+        # Step 2b: Ensemble predictions (XGBoost + LightGBM + Statistical)
+        ensemble_vote = 0
+        ensemble_detail = "Ens:off"
+        ensemble_preds = {}
+        if self.ensemble is not None:
+            try:
+                ensemble_preds = self.ensemble.predict_all(df, self.feature_names)
+                ensemble_vote, ensemble_detail = self.ensemble.get_ensemble_vote(df, self.feature_names)
+                logger.info(f"{symbol} {timeframe} Ensemble: {ensemble_detail}")
+            except Exception as e:
+                logger.warning(f"Ensemble prediction failed: {e}")
+
+        # Step 2c: Regime detection
+        regime_info = {"regime": "unknown", "confidence_adj": 1.0}
+        if self.regime is not None:
+            try:
+                regime_info = self.regime.detect(df)
+                logger.info(f"{symbol} {timeframe} Regime: {regime_info['regime']} (adj={regime_info['confidence_adj']})")
+            except Exception as e:
+                logger.warning(f"Regime detection failed: {e}")
+
+        # Step 2d: Meta-model (if trained, combines all model outputs)
+        meta_vote = 0
+        meta_detail = "Meta:off"
+        if self.meta_model_inst is not None:
+            try:
+                meta_vote, meta_detail = self.meta_model_inst.get_vote(
+                    probabilities, ensemble_preds, regime_info, ta_result
+                )
+                logger.info(f"{symbol} {timeframe} Meta: {meta_detail}")
+            except Exception as e:
+                logger.warning(f"Meta-model failed: {e}")
 
         # Step 3: Assess volatility
         volatility_percentile, volatility_regime = self.assess_volatility(df)
         logger.info(f"{symbol} {timeframe} volatility: {volatility_regime} ({volatility_percentile:.2%})")
 
         # Step 4: Generate hybrid signal from consensus
+        # Now with up to 10 voters: 7 TA + NN + Ensemble + Meta
+        extra_votes = []
+        extra_details = []
+        if self.ensemble is not None:
+            extra_votes.append(ensemble_vote)
+            extra_details.append(ensemble_detail)
+        if self.meta_model_inst is not None:
+            extra_votes.append(meta_vote)
+            extra_details.append(meta_detail)
+
         signal_info = self.generate_hybrid_signal(
-            ta_result, model_vote, model_detail, volatility_percentile
+            ta_result, model_vote, model_detail, volatility_percentile,
+            extra_votes=extra_votes, extra_details=extra_details
         )
+
+        # Apply regime confidence adjustment
+        if regime_info["confidence_adj"] != 1.0 and signal_info["confidence"] > 0:
+            signal_info["confidence"] = round(
+                signal_info["confidence"] * regime_info["confidence_adj"], 2
+            )
+            signal_info["confidence"] = min(signal_info["confidence"], 99)
+
+        # Step 5: Multi-timeframe hierarchy — 4H veto for 15m/1h
+        if timeframe in ("15m", "1h") and signal_info["signal"] != "NO TRADE":
+            htf_bias = self.get_higher_tf_bias(symbol, timeframe)
+
+            if htf_bias["veto"]:
+                # Check if 4H opposes our signal
+                signal_dir = signal_info["signal"]  # "LONG" or "SHORT"
+                htf_dir = htf_bias["direction"]
+
+                if (signal_dir == "LONG" and htf_dir == "SHORT") or \
+                   (signal_dir == "SHORT" and htf_dir == "LONG"):
+                    logger.info(f"4H VETO: {signal_dir} vetoed by strong 4H {htf_dir}")
+                    signal_info["signal"] = "NO TRADE"
+                    signal_info["signal_class"] = 0
+                    signal_info["confidence"] = 0
+                    signal_info["reason"] = f"Vetoed by 4H trend ({htf_dir}). Wait for alignment."
+
+            elif htf_bias["direction"] == signal_info["signal"]:
+                # 4H confirms — boost confidence by 5%
+                signal_info["confidence"] = min(signal_info["confidence"] + 5, 99)
+                signal_info["reason"] += f" [4H confirms {htf_bias['direction']}]"
+
         logger.info(f"{symbol} {timeframe} FINAL: {signal_info['signal']} ({signal_info['confidence']:.1f}%)")
 
         # Get current price
         current_price = df["close"].iloc[-1]
         timestamp = df["timestamp"].iloc[-1]
+
+        # Step 6: Compute ATR-based SL/TP
+        sl_tp = self.compute_atr_sl_tp(df, signal_info["signal"], current_price)
 
         prediction = {
             "symbol": symbol,
@@ -425,8 +602,11 @@ class SignalGenerator:
             },
             "price": float(current_price),
             "timestamp": timestamp.isoformat(),
-            "model": "HYBRID_TA",
-            "reason": signal_info["reason"]
+            "model": "HYBRID_TA_v2",
+            "reason": signal_info["reason"],
+            "stop_loss": sl_tp["stop_loss"],
+            "take_profit": sl_tp["take_profit"],
+            "atr_value": sl_tp["atr_value"]
         }
 
         return prediction
@@ -478,13 +658,77 @@ def load_model_and_predict(
         if len(df) < config.SEQUENCE_LENGTH:
             raise RuntimeError(f"Not enough candles: got {len(df)}, need {config.SEQUENCE_LENGTH}")
 
-        # Create features (computes all TA indicators)
+        # Load BTC data for correlation features
+        btc_df = None
+        if symbol.upper() != "BTCUSDT":
+            try:
+                btc_df = fetcher.fetch_latest_candles(
+                    "BTCUSDT", timeframe,
+                    num_candles=config.SEQUENCE_LENGTH + 200
+                )
+            except Exception as e:
+                logger.warning(f"Could not fetch BTC data for correlation: {e}")
+
+        # Create features (computes all TA indicators + institutional features)
         logger.info("Computing features...")
         engine = FeatureEngine()
-        df = engine.create_all_features(df)
+        df = engine.create_all_features(df, btc_df=btc_df, symbol=symbol)
 
-        # Generate hybrid prediction
-        signal_gen = SignalGenerator(model, feature_names, device=device)
+        # Load ensemble models (optional — graceful fallback if not available)
+        ensemble_mgr = None
+        regime_det = None
+        meta_mdl = None
+        calibrator_inst = None
+
+        try:
+            from ai.ensemble import EnsembleManager
+            ensemble_mgr = EnsembleManager()
+            ensemble_mgr.load_all(config.MODELS_DIR, symbol, timeframe)
+            if ensemble_mgr.xgb_model.is_trained or ensemble_mgr.lgb_model.is_trained:
+                logger.info("Ensemble models loaded")
+            else:
+                ensemble_mgr = None  # No trained ensemble models
+        except Exception as e:
+            logger.debug(f"Ensemble not available: {e}")
+
+        try:
+            from ai.regime import RegimeDetector
+            regime_det = RegimeDetector()
+            regime_path = os.path.join(config.MODELS_DIR, f"{symbol}_{timeframe}_regime.pkl")
+            regime_det.load(regime_path)
+            if not regime_det.is_trained:
+                regime_det = None
+        except Exception as e:
+            logger.debug(f"Regime detector not available: {e}")
+
+        try:
+            from ai.meta_model import MetaModel
+            meta_mdl = MetaModel()
+            meta_path = os.path.join(config.MODELS_DIR, f"{symbol}_{timeframe}_meta.pkl")
+            meta_mdl.load(meta_path)
+            if not meta_mdl.is_trained:
+                meta_mdl = None
+        except Exception as e:
+            logger.debug(f"Meta-model not available: {e}")
+
+        try:
+            from ai.calibration import PlattCalibrator
+            calibrator_inst = PlattCalibrator()
+            cal_path = os.path.join(config.MODELS_DIR, f"{symbol}_{timeframe}_calibration.pkl")
+            calibrator_inst.load(cal_path)
+            if not calibrator_inst.is_trained:
+                calibrator_inst = None
+        except Exception as e:
+            logger.debug(f"Calibrator not available: {e}")
+
+        # Generate hybrid prediction with all available models
+        signal_gen = SignalGenerator(
+            model, feature_names, device=device,
+            ensemble_manager=ensemble_mgr,
+            regime_detector=regime_det,
+            meta_model_inst=meta_mdl,
+            calibrator=calibrator_inst,
+        )
         prediction = signal_gen.predict_symbol(df, symbol, timeframe)
 
         return prediction
@@ -496,14 +740,22 @@ def load_model_and_predict(
 
 def format_signal_output(prediction: Dict) -> str:
     """Format prediction as human-readable text"""
+    sl = prediction.get('stop_loss', 0)
+    tp = prediction.get('take_profit', 0)
+    atr = prediction.get('atr_value', 0)
+
+    sl_tp_line = ""
+    if sl and tp:
+        sl_tp_line = f"\nStop Loss: ${sl:.4f}\nTake Profit: ${tp:.4f}\nATR: ${atr:.4f}"
+
     output = f"""
 {prediction['symbol']} | {prediction['timeframe'].upper()}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Signal: {prediction['signal']}
 Confidence: {prediction['confidence']}%
 Volatility: {prediction['volatility']['regime'].capitalize()}
-Model: Hybrid TA + Neural Network
-Price: ${prediction['price']:.4f}
+Model: {prediction.get('model', 'HYBRID_TA_v2')}
+Price: ${prediction['price']:.4f}{sl_tp_line}
 Time: {prediction['timestamp'][:19]} UTC
 Reason: {prediction['reason']}
 

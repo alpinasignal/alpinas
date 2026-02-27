@@ -108,6 +108,9 @@ class PredictionResponse(BaseModel):
     timestamp: str
     model: str
     reason: str
+    stop_loss: Optional[float] = None
+    take_profit: Optional[float] = None
+    atr_value: Optional[float] = None
 
 
 class BatchPredictionRequest(BaseModel):

@@ -398,6 +398,180 @@ class FeatureEngine:
 
         return df
 
+    def compute_btc_correlation(self, df: pd.DataFrame, btc_df: pd.DataFrame = None) -> pd.DataFrame:
+        """
+        Rolling correlation with BTC returns — critical for altcoin prediction.
+        Also computes relative strength (symbol return - BTC return).
+        """
+        if btc_df is not None and len(btc_df) > 0:
+            # Align BTC data with symbol data by timestamp
+            btc_returns = np.log(btc_df["close"] / btc_df["close"].shift(1)).fillna(0)
+            symbol_returns = df["returns"] if "returns" in df.columns else np.log(df["close"] / df["close"].shift(1)).fillna(0)
+
+            # Ensure same length — align by taking last N rows
+            min_len = min(len(btc_returns), len(symbol_returns))
+            btc_ret_aligned = btc_returns.iloc[-min_len:].reset_index(drop=True)
+            sym_ret_aligned = symbol_returns.iloc[-min_len:].reset_index(drop=True)
+
+            # Rolling correlation
+            window = config.BTC_CORRELATION_WINDOW
+            corr = sym_ret_aligned.rolling(window=window).corr(btc_ret_aligned)
+            df["btc_correlation_20"] = np.nan
+            df.iloc[-min_len:, df.columns.get_loc("btc_correlation_20")] = corr.values
+            df["btc_correlation_20"] = df["btc_correlation_20"].fillna(0)
+
+            # Relative strength: symbol - BTC (positive = outperforming BTC)
+            rel_strength = sym_ret_aligned - btc_ret_aligned
+            rolling_rs = rel_strength.rolling(window=window).mean() * 100  # scale up
+            df["btc_relative_strength"] = np.nan
+            df.iloc[-min_len:, df.columns.get_loc("btc_relative_strength")] = rolling_rs.values
+            df["btc_relative_strength"] = df["btc_relative_strength"].fillna(0)
+            df["btc_relative_strength"] = np.clip(df["btc_relative_strength"], -5, 5)
+        else:
+            # For BTCUSDT itself or when BTC data unavailable
+            df["btc_correlation_20"] = 0.0
+            df["btc_relative_strength"] = 0.0
+
+        self.feature_names.extend(["btc_correlation_20", "btc_relative_strength"])
+        return df
+
+    def compute_ema_slope(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Rate of change of EMA — captures trend acceleration/deceleration.
+        Positive slope = accelerating trend, negative = decelerating.
+        """
+        for period in config.EMA_PERIODS:
+            ema = df["close"].ewm(span=period, adjust=False).mean()
+            atr = self._compute_atr(df, period=14)
+
+            # Slope = change in EMA over 5 periods, normalized by ATR
+            slope = (ema - ema.shift(5)) / (atr + 1e-8)
+            col_name = f"ema_slope_{period}"
+            df[col_name] = slope.fillna(0)
+            df[col_name] = np.clip(df[col_name], -5, 5)
+            self.feature_names.append(col_name)
+
+        return df
+
+    def compute_regression_slope(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Linear regression slope over N periods — pure trend direction.
+        Normalized by ATR for cross-asset comparison.
+        """
+        window = config.REGRESSION_SLOPE_WINDOW
+        atr = self._compute_atr(df, period=14)
+
+        def linreg_slope(series):
+            if len(series) < window:
+                return 0
+            x = np.arange(len(series))
+            slope = np.polyfit(x, series, 1)[0]
+            return slope
+
+        slopes = df["close"].rolling(window=window).apply(linreg_slope, raw=True)
+        df["regression_slope_20"] = slopes / (atr + 1e-8)
+        df["regression_slope_20"] = df["regression_slope_20"].fillna(0)
+        df["regression_slope_20"] = np.clip(df["regression_slope_20"], -5, 5)
+
+        self.feature_names.append("regression_slope_20")
+        return df
+
+    def compute_higher_highs_lower_lows(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Market structure: count Higher Highs / Higher Lows vs Lower Highs / Lower Lows.
+        Score [-1, 1] where 1 = strong uptrend structure, -1 = strong downtrend.
+        """
+        lookback = config.HH_LL_LOOKBACK
+
+        def hh_ll_score(idx):
+            if idx < lookback:
+                return 0
+            segment = df.iloc[idx - lookback:idx]
+            highs = segment["high"].values
+            lows = segment["low"].values
+
+            hh = sum(1 for i in range(1, len(highs)) if highs[i] > highs[i-1])
+            ll = sum(1 for i in range(1, len(lows)) if lows[i] < lows[i-1])
+            hl = sum(1 for i in range(1, len(lows)) if lows[i] > lows[i-1])
+            lh = sum(1 for i in range(1, len(highs)) if highs[i] < highs[i-1])
+
+            bullish = hh + hl
+            bearish = ll + lh
+            total = bullish + bearish
+            if total == 0:
+                return 0
+            return (bullish - bearish) / total
+
+        scores = [hh_ll_score(i) for i in range(len(df))]
+        df["hh_ll_score"] = scores
+
+        self.feature_names.append("hh_ll_score")
+        return df
+
+    def compute_vwap_distance(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Distance from VWAP (Volume Weighted Average Price), normalized by ATR.
+        Positive = price above VWAP (bullish), negative = below (bearish).
+        """
+        # Compute intraday VWAP (rolling 20-period approximation)
+        typical_price = (df["high"] + df["low"] + df["close"]) / 3
+        cumulative_tp_vol = (typical_price * df["volume"]).rolling(window=20).sum()
+        cumulative_vol = df["volume"].rolling(window=20).sum()
+        vwap = cumulative_tp_vol / (cumulative_vol + 1e-8)
+
+        atr = self._compute_atr(df, period=14)
+        df["vwap_distance"] = (df["close"] - vwap) / (atr + 1e-8)
+        df["vwap_distance"] = df["vwap_distance"].fillna(0)
+        df["vwap_distance"] = np.clip(df["vwap_distance"], -5, 5)
+
+        self.feature_names.append("vwap_distance")
+        return df
+
+    def compute_range_compression(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Bollinger bandwidth percentile — detects squeeze (low = compression, about to expand).
+        """
+        if "bb_bandwidth" not in df.columns:
+            window = 20
+            rolling_mean = df["close"].rolling(window=window).mean()
+            rolling_std = df["close"].rolling(window=window).std()
+            bb_bw = rolling_std / (rolling_mean + 1e-8)
+        else:
+            bb_bw = df["bb_bandwidth"]
+
+        # Percentile rank over last 100 periods
+        df["range_compression"] = bb_bw.rolling(window=100).apply(
+            lambda x: pd.Series(x).rank(pct=True).iloc[-1], raw=False
+        )
+        df["range_compression"] = df["range_compression"].fillna(0.5)
+
+        self.feature_names.append("range_compression")
+        return df
+
+    def compute_time_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Cyclical time encoding — hour of day and day of week as sin/cos.
+        Captures trading session patterns (Asia/Europe/US overlap).
+        """
+        if "timestamp" in df.columns:
+            ts = pd.to_datetime(df["timestamp"])
+            hours = ts.dt.hour
+            dow = ts.dt.dayofweek
+
+            # Cyclical encoding (sin/cos for continuity at boundaries)
+            df["hour_sin"] = np.sin(2 * np.pi * hours / 24)
+            df["hour_cos"] = np.cos(2 * np.pi * hours / 24)
+            df["dow_sin"] = np.sin(2 * np.pi * dow / 7)
+            df["dow_cos"] = np.cos(2 * np.pi * dow / 7)
+        else:
+            df["hour_sin"] = 0.0
+            df["hour_cos"] = 0.0
+            df["dow_sin"] = 0.0
+            df["dow_cos"] = 0.0
+
+        self.feature_names.extend(["hour_sin", "hour_cos", "dow_sin", "dow_cos"])
+        return df
+
     def _compute_atr(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
         """Helper: compute Average True Range"""
         high_low = df["high"] - df["low"]
@@ -409,12 +583,14 @@ class FeatureEngine:
 
         return atr
 
-    def create_all_features(self, df: pd.DataFrame) -> pd.DataFrame:
+    def create_all_features(self, df: pd.DataFrame, btc_df: pd.DataFrame = None, symbol: str = None) -> pd.DataFrame:
         """
         Apply all feature engineering steps
 
         Args:
             df: DataFrame with OHLCV columns
+            btc_df: Optional BTC DataFrame for correlation features
+            symbol: Optional symbol name (to skip BTC correlation for BTCUSDT)
 
         Returns:
             DataFrame with all features
@@ -442,6 +618,16 @@ class FeatureEngine:
         df = self.compute_support_resistance(df)  # Support/Resistance
         df = self.compute_order_flow_proxy(df)    # Order flow
         df = self.compute_multi_timeframe_momentum(df)  # MTF momentum
+
+        # ===== INSTITUTIONAL FEATURES =====
+        skip_btc = (symbol and symbol.upper() == "BTCUSDT")
+        df = self.compute_btc_correlation(df, btc_df if not skip_btc else None)
+        df = self.compute_ema_slope(df)
+        df = self.compute_regression_slope(df)
+        df = self.compute_higher_highs_lower_lows(df)
+        df = self.compute_vwap_distance(df)
+        df = self.compute_range_compression(df)
+        df = self.compute_time_features(df)
 
         # Drop any remaining NaNs (from initial rolling windows)
         df = df.dropna().reset_index(drop=True)

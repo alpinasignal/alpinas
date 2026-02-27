@@ -403,10 +403,31 @@ def train_model(
         logger.error(f"Failed to load data for {symbol} {timeframe}")
         return None
 
+    # Load BTC data for correlation features (skip for BTCUSDT itself)
+    btc_df = None
+    if symbol.upper() != "BTCUSDT":
+        logger.info("Loading BTC data for correlation features...")
+        btc_df = load_cached_data("BTCUSDT", timeframe)
+        if btc_df is None:
+            try:
+                from data.market import BinanceDataFetcher
+                fetcher = BinanceDataFetcher()
+                btc_df = fetcher.fetch_or_load("BTCUSDT", timeframe)
+            except Exception as e:
+                logger.warning(f"Could not load BTC data for correlation: {e}")
+
+    # Cap data size for training speed (use most recent candles)
+    max_candles = getattr(config, 'MAX_TRAINING_CANDLES', 25000)
+    if len(df) > max_candles:
+        logger.info(f"Capping data from {len(df)} to {max_candles} most recent candles")
+        df = df.tail(max_candles).reset_index(drop=True)
+        if btc_df is not None and len(btc_df) > max_candles:
+            btc_df = btc_df.tail(max_candles).reset_index(drop=True)
+
     # Feature engineering
     logger.info("Creating features...")
     engine = FeatureEngine()
-    df = engine.create_all_features(df)
+    df = engine.create_all_features(df, btc_df=btc_df, symbol=symbol)
     df = create_labels(df)
 
     feature_cols = engine.get_feature_names()
