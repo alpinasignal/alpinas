@@ -141,15 +141,25 @@ async def send_signal_notification(telegram_id: int, signal_data: dict):
     try:
         signal_emoji = "📈" if signal_data["signal"] == "LONG" else "📉" if signal_data["signal"] == "SHORT" else "⚠️"
 
+        price = signal_data.get("price", 0)
+        # Format price: fewer decimals for large coins, more for small ones
+        price_str = f"${price:,.2f}" if price > 1 else f"${price:.6f}"
+
+        sl = signal_data.get("stop_loss", 0)
+        tp = signal_data.get("take_profit", 0)
+        sl_str = (f"${sl:,.2f}" if sl > 1 else f"${sl:.6f}") if sl else "—"
+        tp_str = (f"${tp:,.2f}" if tp > 1 else f"${tp:.6f}") if tp else "—"
+
+        reason = signal_data.get("reason", "")
+        reason_line = f"\n<i>{reason[:120]}</i>" if reason else ""
+
         message = f"""
-{signal_emoji} <b>{signal_data['signal']}</b> Signal
+{signal_emoji} <b>{signal_data['signal']}</b> — {signal_data['symbol']} ({signal_data['timeframe']})
 
-<b>Pair:</b> {signal_data['symbol']}
-<b>Timeframe:</b> {signal_data['timeframe']}
-<b>Confidence:</b> {signal_data['confidence']:.1%}
-<b>Price:</b> ${signal_data['price']:.2f}
-
-<i>Open Mini App for details</i>
+<b>Confidence:</b> {signal_data['confidence']:.1f}%
+<b>Price:</b> {price_str}
+<b>Stop Loss:</b> {sl_str}
+<b>Take Profit:</b> {tp_str}{reason_line}
 """
 
         keyboard = [

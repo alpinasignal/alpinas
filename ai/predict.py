@@ -293,18 +293,28 @@ class SignalGenerator:
         model_detail: str,
         volatility_percentile: float,
         extra_votes: List = None,
-        extra_details: List = None
+        extra_details: List = None,
+        nn_probabilities: np.ndarray = None,
     ) -> Dict:
         """
         Generate signal from TA consensus + model vote + ensemble votes.
 
-        Base: 7 TA indicators + 1 neural network = 8 voters.
-        With ensemble: + ensemble vote + meta-model vote = up to 10 voters.
-        Signal when one side has clear majority.
+        NN counts as 3 votes (not 1) — it's trained to predict the future,
+        while TA indicators are lagging. Confidence blends vote consensus with
+        NN probability so a high-agreement TA signal can't reach 99% if the
+        NN disagrees.
         """
-        # Combine all votes
-        all_votes = ta_result["votes"] + [model_vote]
-        all_details = ta_result["details"] + [model_detail]
+        # NN counts as 3 votes to better balance trained predictor vs lagging TA
+        nn_weight = 3
+        ta_votes = ta_result["votes"]
+        ta_details = ta_result["details"]
+
+        # Expand NN vote to nn_weight votes
+        nn_votes_list = [model_vote] * nn_weight
+        nn_details_list = [model_detail] + [""] * (nn_weight - 1)
+
+        all_votes = ta_votes + nn_votes_list
+        all_details = ta_details + [model_detail]
 
         if extra_votes:
             all_votes.extend(extra_votes)
@@ -312,7 +322,6 @@ class SignalGenerator:
             all_details.extend(extra_details)
 
         total = len(all_votes)
-
         long_votes = sum(1 for v in all_votes if v > 0)
         short_votes = sum(1 for v in all_votes if v < 0)
         neutral_votes = sum(1 for v in all_votes if v == 0)
@@ -324,53 +333,75 @@ class SignalGenerator:
         elif volatility_percentile > 0.75:
             vol_warning = " (High volatility)"
 
-        # Determine signal based on consensus
-        # Signal given when one side has clear majority over the other
-        # Confidence = winning / (winning + losing) * 100
+        # Need stricter majority: at least 55% of all votes
+        min_votes_for_signal = max(4, int(total * 0.50))
 
-        if long_votes > short_votes and long_votes >= 3:
+        if long_votes > short_votes and long_votes >= min_votes_for_signal:
             signal = "LONG"
             signal_class = 1
             directional = long_votes + short_votes
-            confidence = (long_votes / directional) * 100 if directional > 0 else 50
+            vote_conf = (long_votes / directional) * 100 if directional > 0 else 50
 
-            if long_votes >= 6:
+            if long_votes >= int(total * 0.75):
                 reason = f"Strong bullish consensus ({long_votes}/{total} indicators){vol_warning}"
-            elif long_votes >= 5:
+            elif long_votes >= int(total * 0.65):
                 reason = f"Bullish signal ({long_votes}/{total} indicators agree){vol_warning}"
-            elif long_votes >= 4:
-                reason = f"Moderate bullish signal ({long_votes}/{total} indicators){vol_warning}"
             else:
-                reason = f"Weak bullish tendency ({long_votes}/{total} indicators){vol_warning}"
+                reason = f"Moderate bullish signal ({long_votes}/{total} indicators){vol_warning}"
 
-        elif short_votes > long_votes and short_votes >= 3:
+        elif short_votes > long_votes and short_votes >= min_votes_for_signal:
             signal = "SHORT"
             signal_class = 2
             directional = long_votes + short_votes
-            confidence = (short_votes / directional) * 100 if directional > 0 else 50
+            vote_conf = (short_votes / directional) * 100 if directional > 0 else 50
 
-            if short_votes >= 6:
+            if short_votes >= int(total * 0.75):
                 reason = f"Strong bearish consensus ({short_votes}/{total} indicators){vol_warning}"
-            elif short_votes >= 5:
+            elif short_votes >= int(total * 0.65):
                 reason = f"Bearish signal ({short_votes}/{total} indicators agree){vol_warning}"
-            elif short_votes >= 4:
-                reason = f"Moderate bearish signal ({short_votes}/{total} indicators){vol_warning}"
             else:
-                reason = f"Weak bearish tendency ({short_votes}/{total} indicators){vol_warning}"
+                reason = f"Moderate bearish signal ({short_votes}/{total} indicators){vol_warning}"
 
         else:
-            # Tied or no clear direction
             signal = "NO TRADE"
             signal_class = 0
-            confidence = 0
+            vote_conf = 0
             reason = f"No consensus (L:{long_votes} S:{short_votes} N:{neutral_votes}) - wait for setup{vol_warning}"
 
-        # Build probabilities from votes for API compatibility
+        # --- Blend NN probability into confidence ---
+        # NN was trained to predict direction → weight it 50/50 with vote consensus
+        if signal != "NO TRADE" and nn_probabilities is not None:
+            nn_idx = 1 if signal == "LONG" else 2
+            nn_prob_for_signal = float(nn_probabilities[nn_idx])  # 0-1
+            nn_conf = nn_prob_for_signal * 100  # Convert to 0-100
+
+            # 50% vote consensus + 50% NN probability
+            confidence = vote_conf * 0.50 + nn_conf * 0.50
+
+            # Penalty: if NN strongly favors the OPPOSITE direction, reduce confidence
+            opposite_idx = 2 if signal == "LONG" else 1
+            nn_opposite = float(nn_probabilities[opposite_idx])
+            if nn_opposite > 0.50:
+                confidence *= 0.60  # NN contradicts → big penalty
+                reason += f" [NN disagrees: {nn_opposite:.0%} {('SHORT' if signal == 'LONG' else 'LONG')}]"
+            elif nn_opposite > 0.35:
+                confidence *= 0.80  # Mild disagreement
+        else:
+            confidence = vote_conf
+
+        # Hard cap: signals are never 100% certain
+        confidence = min(float(confidence), 85.0)
+
+        # Build probabilities for API
         prob_long = long_votes / total
         prob_short = short_votes / total
         prob_no_trade = neutral_votes / total
 
-        logger.info(f"Hybrid signal: {signal} {confidence:.1f}% | Votes: L={long_votes} S={short_votes} N={neutral_votes} | {', '.join(all_details)}")
+        logger.info(
+            f"Hybrid signal: {signal} {confidence:.1f}% | "
+            f"Votes: L={long_votes} S={short_votes} N={neutral_votes} | "
+            f"{', '.join(all_details)}"
+        )
 
         return {
             "signal": signal,
@@ -549,7 +580,8 @@ class SignalGenerator:
 
         signal_info = self.generate_hybrid_signal(
             ta_result, model_vote, model_detail, volatility_percentile,
-            extra_votes=extra_votes, extra_details=extra_details
+            extra_votes=extra_votes, extra_details=extra_details,
+            nn_probabilities=probabilities,
         )
 
         # Apply regime confidence adjustment

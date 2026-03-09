@@ -37,6 +37,27 @@ except Exception as _bot_import_err:
     async def send_signal_notification(*args, **kwargs):
         pass
 
+# Import scanner (safe import)
+try:
+    from api.scanner import init_scanner, scan_all_signals
+except Exception:
+    try:
+        from scanner import init_scanner, scan_all_signals
+    except Exception as _scanner_err:
+        logger.warning(f"Could not import scanner: {_scanner_err}")
+        def init_scanner(*args, **kwargs): pass
+        async def scan_all_signals(): pass
+
+# APScheduler for background scanning
+try:
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    _scheduler = AsyncIOScheduler()
+    _scheduler_available = True
+except ImportError:
+    logger.warning("apscheduler not installed — auto-scan disabled. Run: pip install apscheduler")
+    _scheduler_available = False
+    _scheduler = None
+
 # Initialize FastAPI app
 app = FastAPI(
     title=config.API_TITLE,
@@ -642,11 +663,34 @@ async def startup_event():
     latest_models = model_store.get_latest_models()
     logger.info(f"Available models: {len(latest_models)}")
 
+    # Start auto signal scanner
+    if _scheduler_available and _scheduler is not None:
+        try:
+            init_scanner(db_manager, sub_manager, model_store, _notification_counts)
+            interval = getattr(config, "SCANNER_INTERVAL_MINUTES", 15)
+            _scheduler.add_job(
+                scan_all_signals,
+                "interval",
+                minutes=interval,
+                id="signal_scanner",
+                replace_existing=True,
+                max_instances=1,  # Don't overlap if scan takes longer than interval
+            )
+            _scheduler.start()
+            logger.info(f"Auto signal scanner started — scanning every {interval} min")
+        except Exception as e:
+            logger.error(f"Failed to start scanner: {e}")
+    else:
+        logger.warning("APScheduler not available — auto signal scanning disabled")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
     logger.info("Shutting down Alpina Signal API")
+    if _scheduler_available and _scheduler is not None and _scheduler.running:
+        _scheduler.shutdown(wait=False)
+        logger.info("Scanner stopped")
 
 
 # ========================

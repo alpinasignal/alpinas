@@ -176,6 +176,19 @@ SUBSCRIPTION_TIERS = {
 TELEGRAM_ALERT_MIN_CONFIDENCE = 70  # Only send alerts for 70%+ signals
 
 # ========================
+# AUTO SIGNAL SCANNER
+# ========================
+
+# Minimum confidence for AUTO signals sent to all subscribers (higher threshold)
+AUTO_SIGNAL_MIN_CONFIDENCE = 80  # Only auto-send for 80%+ signals
+
+# How often to scan all pairs (in minutes)
+SCANNER_INTERVAL_MINUTES = 15  # Scan every 15 minutes
+
+# How long to wait before re-sending the same signal (hours)
+SCANNER_RESEND_HOURS = 6  # Don't spam same signal within 6 hours
+
+# ========================
 # API CONFIGURATION
 # ========================
 

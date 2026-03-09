@@ -79,6 +79,19 @@ class PredictionHistory(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SignalNotificationLog(Base):
+    """Track auto-sent signal notifications to prevent spam"""
+    __tablename__ = "signal_notification_log"
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, nullable=False)
+    symbol = Column(String, nullable=False)
+    timeframe = Column(String, nullable=False)
+    signal = Column(String, nullable=False)  # LONG or SHORT
+    confidence = Column(Float, nullable=False)
+    sent_at = Column(DateTime, default=datetime.utcnow)
+
+
 # ========================
 # DATABASE MANAGER
 # ========================
@@ -587,6 +600,115 @@ class SubscriptionManager:
         finally:
             if session:
                 session.close()
+
+    # ========================
+    # SCANNER / AUTO-NOTIFICATION
+    # ========================
+
+    def get_subscribers_for_symbol(self, symbol: str) -> List[dict]:
+        """
+        Get all active paid subscribers who have selected this symbol
+        and have telegram_alerts enabled.
+        Returns list of dicts: {telegram_id, user_id, tier, daily_alerts}
+        """
+        session = self.db.get_session()
+        if not session:
+            return []
+
+        try:
+            # Tiers that have telegram_alerts = True
+            alert_tiers = [
+                t for t, cfg in config.SUBSCRIPTION_TIERS.items()
+                if cfg.get("telegram_alerts", False)
+            ]
+
+            rows = session.query(User, Subscription).join(
+                Subscription, User.id == Subscription.user_id
+            ).filter(
+                Subscription.is_active == True,
+                Subscription.tier.in_(alert_tiers)
+            ).all()
+
+            result = []
+            for user, sub in rows:
+                # Check if subscription is expired
+                if sub.expires_at and sub.expires_at < datetime.utcnow():
+                    continue
+                # Check if this symbol is in selected coins
+                selected = sub.selected_coins or []
+                if symbol not in selected:
+                    continue
+                daily_alerts = config.SUBSCRIPTION_TIERS.get(sub.tier, {}).get("daily_alerts", 0)
+                result.append({
+                    "telegram_id": user.telegram_id,
+                    "user_id": user.id,
+                    "tier": sub.tier,
+                    "daily_alerts": daily_alerts
+                })
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Error getting subscribers for {symbol}: {e}")
+            return []
+        finally:
+            session.close()
+
+    def was_notified_recently(
+        self, user_id: int, symbol: str, timeframe: str,
+        signal: str, hours: float = 6.0
+    ) -> bool:
+        """Check if we already sent this signal to this user within <hours>"""
+        session = self.db.get_session()
+        if not session:
+            return False
+
+        try:
+            from datetime import timedelta
+            cutoff = datetime.utcnow() - timedelta(hours=hours)
+            exists = session.query(SignalNotificationLog).filter(
+                SignalNotificationLog.user_id == user_id,
+                SignalNotificationLog.symbol == symbol,
+                SignalNotificationLog.timeframe == timeframe,
+                SignalNotificationLog.signal == signal,
+                SignalNotificationLog.sent_at >= cutoff
+            ).first()
+            return exists is not None
+        except Exception as e:
+            logger.error(f"Error checking notification log: {e}")
+            return False
+        finally:
+            session.close()
+
+    def log_notification(
+        self, user_id: int, symbol: str, timeframe: str,
+        signal: str, confidence: float
+    ):
+        """Record that we sent this signal notification"""
+        session = self.db.get_session()
+        if not session:
+            return
+
+        try:
+            log = SignalNotificationLog(
+                user_id=user_id,
+                symbol=symbol,
+                timeframe=timeframe,
+                signal=signal,
+                confidence=confidence
+            )
+            session.add(log)
+            session.commit()
+        except Exception as e:
+            logger.error(f"Error logging notification: {e}")
+            if session:
+                session.rollback()
+        finally:
+            session.close()
+
+    def get_all_admin_telegram_ids(self) -> List[int]:
+        """Return admin telegram IDs from config"""
+        return list(config.ADMIN_IDS)
 
     # ========================
     # ADMIN FUNCTIONS
