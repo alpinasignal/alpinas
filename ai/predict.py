@@ -249,22 +249,34 @@ class SignalGenerator:
             return probabilities
 
     def get_model_vote(self, probabilities: np.ndarray) -> Tuple[int, str]:
-        """Convert model output to a vote (+1 LONG, -1 SHORT, 0 NEUTRAL)"""
+        """
+        Convert model output to a vote (+1 LONG, -1 SHORT, 0 NEUTRAL).
+        NN only votes when it has clear conviction — random baseline is ~33%.
+        Requires meaningful gap over NO_TRADE probability.
+        """
         prob_no_trade = probabilities[0]
         prob_long = probabilities[1]
         prob_short = probabilities[2]
 
         max_idx = int(np.argmax(probabilities))
 
-        if max_idx == 1 and prob_long > 0.40:
+        # If model is most confident about NO_TRADE, it abstains
+        if max_idx == 0:
+            return 0, f"NN:noTrade({prob_no_trade:.0%})"
+
+        # Require meaningful conviction: directional prob must beat NO_TRADE
+        # and exceed 0.45 (well above random 0.33 baseline)
+        if max_idx == 1 and prob_long > 0.55 and prob_long > prob_no_trade:
             return 1, f"NN:LONG({prob_long:.0%})"
-        elif max_idx == 2 and prob_short > 0.40:
+        elif max_idx == 2 and prob_short > 0.55 and prob_short > prob_no_trade:
             return -1, f"NN:SHORT({prob_short:.0%})"
-        elif max_idx == 1:
+        elif max_idx == 1 and prob_long > 0.45 and prob_long > prob_no_trade:
             return 1, f"NN:mildL({prob_long:.0%})"
-        elif max_idx == 2:
+        elif max_idx == 2 and prob_short > 0.45 and prob_short > prob_no_trade:
             return -1, f"NN:mildS({prob_short:.0%})"
-        return 0, f"NN:neutral({prob_no_trade:.0%})"
+
+        # Insufficient conviction
+        return 0, f"NN:weak(L={prob_long:.0%},S={prob_short:.0%})"
 
     def assess_volatility(self, df: pd.DataFrame) -> Tuple[float, str]:
         """Assess current volatility regime"""
@@ -304,14 +316,27 @@ class SignalGenerator:
         NN probability so a high-agreement TA signal can't reach 99% if the
         NN disagrees.
         """
-        # NN counts as 3 votes to better balance trained predictor vs lagging TA
-        nn_weight = 3
+        # Adaptive NN weight based on conviction level
+        # Strong (>55%): 4 votes. Moderate (>45%): 3 votes. Weak/abstain: 1 vote.
+        if nn_probabilities is not None:
+            nn_dir_idx = 1 if model_vote > 0 else (2 if model_vote < 0 else 0)
+            nn_dir_prob = float(nn_probabilities[nn_dir_idx]) if model_vote != 0 else 0.0
+            if nn_dir_prob > 0.60:
+                nn_weight = 4
+            elif nn_dir_prob > 0.50:
+                nn_weight = 3
+            elif nn_dir_prob > 0.45:
+                nn_weight = 2
+            else:
+                nn_weight = 1  # Low conviction — minimal influence
+        else:
+            nn_weight = 2
+
         ta_votes = ta_result["votes"]
         ta_details = ta_result["details"]
 
         # Expand NN vote to nn_weight votes
         nn_votes_list = [model_vote] * nn_weight
-        nn_details_list = [model_detail] + [""] * (nn_weight - 1)
 
         all_votes = ta_votes + nn_votes_list
         all_details = ta_details + [model_detail]
@@ -589,15 +614,37 @@ class SignalGenerator:
             signal_info["confidence"] = round(
                 signal_info["confidence"] * regime_info["confidence_adj"], 2
             )
-            signal_info["confidence"] = min(signal_info["confidence"], 99)
+            signal_info["confidence"] = min(signal_info["confidence"], 85)
+
+        # Step 4b: EMA trend filter — block signals that go against EMA50 trend
+        # This prevents signals at end of exhausted moves
+        if signal_info["signal"] != "NO TRADE":
+            last_row = df.iloc[-1]
+            ema50_dist = last_row.get("ema_distance_50", 0)
+            signal_dir = signal_info["signal"]
+
+            # If we're signalling LONG but price is far BELOW EMA50 (>2 ATR), reduce confidence
+            # If signalling SHORT but price is far ABOVE EMA50, reduce confidence
+            if signal_dir == "LONG" and ema50_dist < -1.5:
+                signal_info["confidence"] *= 0.75
+                signal_info["reason"] += " [Counter-trend: price below EMA50]"
+            elif signal_dir == "SHORT" and ema50_dist > 1.5:
+                signal_info["confidence"] *= 0.75
+                signal_info["reason"] += " [Counter-trend: price above EMA50]"
+
+            # If NN said NO_TRADE (max prob on class 0), reduce confidence substantially
+            if nn_probabilities is not None and np.argmax(nn_probabilities) == 0:
+                signal_info["confidence"] *= 0.65
+                signal_info["reason"] += " [NN prefers NoTrade]"
+
+            signal_info["confidence"] = round(signal_info["confidence"], 2)
 
         # Step 5: Multi-timeframe hierarchy — 4H veto for 15m/1h
         if timeframe in ("15m", "1h") and signal_info["signal"] != "NO TRADE":
             htf_bias = self.get_higher_tf_bias(symbol, timeframe)
 
             if htf_bias["veto"]:
-                # Check if 4H opposes our signal
-                signal_dir = signal_info["signal"]  # "LONG" or "SHORT"
+                signal_dir = signal_info["signal"]
                 htf_dir = htf_bias["direction"]
 
                 if (signal_dir == "LONG" and htf_dir == "SHORT") or \
@@ -609,8 +656,8 @@ class SignalGenerator:
                     signal_info["reason"] = f"Vetoed by 4H trend ({htf_dir}). Wait for alignment."
 
             elif htf_bias["direction"] == signal_info["signal"]:
-                # 4H confirms — boost confidence by 5%
-                signal_info["confidence"] = min(signal_info["confidence"] + 5, 99)
+                # 4H confirms — small boost
+                signal_info["confidence"] = min(signal_info["confidence"] + 4, 85)
                 signal_info["reason"] += f" [4H confirms {htf_bias['direction']}]"
 
         logger.info(f"{symbol} {timeframe} FINAL: {signal_info['signal']} ({signal_info['confidence']:.1f}%)")

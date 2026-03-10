@@ -94,10 +94,11 @@ TRAIN_TEST_SPLIT = 0.80  # 80% train, 20% test
 # Class labels (defined above in neural network section)
 
 # Dynamic labeling thresholds (relative to ATR)
-LABEL_THRESHOLD_MULTIPLIER = 0.5  # 0.5 * ATR
+# Higher = fewer but higher quality signals (less noise in training data)
+LABEL_THRESHOLD_MULTIPLIER = 1.0  # 1.0 * ATR — requires meaningful move to be labeled signal
 
 # Look-ahead for labeling (how many candles forward)
-LABEL_LOOKAHEAD = 10
+LABEL_LOOKAHEAD = 12  # 12 candles: 3h for 15m, 12h for 1h, 48h for 4h
 
 # ========================
 # INFERENCE & SIGNAL GENERATION
