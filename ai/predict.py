@@ -633,7 +633,7 @@ class SignalGenerator:
                 signal_info["reason"] += " [Counter-trend: price above EMA50]"
 
             # If NN said NO_TRADE (max prob on class 0), reduce confidence substantially
-            if nn_probabilities is not None and np.argmax(nn_probabilities) == 0:
+            if probabilities is not None and np.argmax(probabilities) == 0:
                 signal_info["confidence"] *= 0.65
                 signal_info["reason"] += " [NN prefers NoTrade]"
 
