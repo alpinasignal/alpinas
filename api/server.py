@@ -201,7 +201,16 @@ async def root():
 @app.get("/health")
 async def health():
     """Health check endpoint for Railway"""
-    return {"status": "ok"}
+    models_dir = config.MODELS_DIR
+    pt_files = []
+    if os.path.exists(models_dir):
+        pt_files = [f for f in os.listdir(models_dir) if f.endswith(".pt")]
+    return {
+        "status": "ok",
+        "models_dir": models_dir,
+        "models_count": len(pt_files),
+        "models_ok": len(pt_files) >= 45
+    }
 
 
 @app.get("/api")
@@ -301,9 +310,18 @@ async def get_prediction(
     model_path = model_store.get_model_path(symbol, timeframe)
 
     if model_path is None or not os.path.exists(model_path):
+        # Log debug info
+        models_dir = config.MODELS_DIR
+        existing = os.listdir(models_dir) if os.path.exists(models_dir) else []
+        pt_files = [f for f in existing if f.endswith(".pt")]
+        logger.error(
+            f"Model not found for {symbol} {timeframe}. "
+            f"models_dir={models_dir}, total .pt files={len(pt_files)}, "
+            f"expected={symbol}_{timeframe}_transformer.pt"
+        )
         raise HTTPException(
             status_code=404,
-            detail=f"Model not found for {symbol} {timeframe}"
+            detail=f"Model not found for {symbol} {timeframe}. Available: {len(pt_files)} models on server."
         )
 
     # Generate prediction
