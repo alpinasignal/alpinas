@@ -709,7 +709,14 @@ def load_model_and_predict(
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model file not found: {model_path}")
 
-        checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+        try:
+            checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+        except Exception as load_err:
+            file_size = os.path.getsize(model_path) if os.path.exists(model_path) else 0
+            raise RuntimeError(
+                f"torch.load failed for {model_path} "
+                f"(size={file_size} bytes, torch={torch.__version__}): {load_err}"
+            ) from load_err
 
         num_features = checkpoint["num_features"]
         model_type = checkpoint["model_type"]
