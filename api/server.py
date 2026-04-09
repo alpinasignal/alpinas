@@ -666,7 +666,7 @@ async def startup_event():
     # Start auto signal scanner
     if _scheduler_available and _scheduler is not None:
         try:
-            init_scanner(db_manager, sub_manager, model_store, _notification_counts)
+            init_scanner(db_manager, subscription_manager, model_store, _notification_counts)
             interval = getattr(config, "SCANNER_INTERVAL_MINUTES", 15)
             _scheduler.add_job(
                 scan_all_signals,

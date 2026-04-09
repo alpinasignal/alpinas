@@ -7,7 +7,7 @@ const API_BASE_URL = window.location.hostname === 'localhost'
     ? 'http://localhost:8000/api/v1'
     : `${window.location.origin}/api/v1`;
 const FREE_ATTEMPTS_LIMIT = 2;
-const ADMIN_IDS = [7940666073, 5480212100];  // Admin Telegram IDs
+const ADMIN_IDS = [7940666073, 5480212100, 1229980947];  // Admin Telegram IDs
 
 // Telegram Web App
 const tg = window.Telegram?.WebApp || { expand: () => {}, ready: () => {}, initDataUnsafe: {} };
