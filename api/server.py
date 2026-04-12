@@ -626,23 +626,57 @@ async def verify_payment(request: VerifyPaymentRequest):
         )
 
         if payment_result and payment_result.get("verified"):
-            # Payment found! Activate subscription
+            # Payment found! Activate subscription in database
             logger.info(f"✅ Payment verified for user {user_id}: {payment_result}")
 
-            # TODO: Create/update user subscription in database
-            # For now, just return success
-            # In full implementation, call:
-            # subscription_manager.upgrade_subscription(user_id, plan)
+            # Determine which coins to grant based on plan
+            tier_info = config.SUBSCRIPTION_TIERS.get(plan, {})
+            coins_count = tier_info.get("coins", 0)
+            if coins_count >= 15 or plan == "pro":
+                selected_coins = config.SUPPORTED_PAIRS  # All 15 coins
+            else:
+                selected_coins = config.SUPPORTED_PAIRS[:7]  # First 7 coins
+
+            # Activate subscription in database
+            try:
+                activated = subscription_manager.upgrade_subscription(
+                    user_id=user_id,
+                    tier=plan,
+                    selected_coins=list(selected_coins),
+                    duration_days=30
+                )
+                logger.info(f"✅ Subscription activated: user={user_id} plan={plan} coins={len(selected_coins)}")
+
+                # Send Telegram notification to user
+                try:
+                    # Get telegram_id for this user
+                    session = db_manager.get_session()
+                    if session:
+                        from payments.subscriptions import User
+                        db_user = session.query(User).filter(User.id == user_id).first()
+                        session.close()
+                        if db_user:
+                            from bot.bot import send_subscription_activated
+                            asyncio.create_task(
+                                send_subscription_activated(db_user.telegram_id, plan)
+                            )
+                except Exception as notif_err:
+                    logger.warning(f"Could not send activation notification: {notif_err}")
+
+            except Exception as db_err:
+                logger.error(f"Failed to activate subscription in DB: {db_err}")
+                # Still return success — payment was verified
 
             return {
                 "success": True,
                 "payment_verified": True,
-                "message": f"Payment verified! {payment_result['amount']:.2f} USDT received.",
+                "message": f"Payment verified! {payment_result['amount']:.2f} USDT received. Your {plan} plan is now active!",
                 "transaction_hash": payment_result["transaction_hash"],
                 "timestamp": payment_result["timestamp"],
                 "user_id": user_id,
                 "plan": plan,
-                "amount": payment_result["amount"]
+                "amount": payment_result["amount"],
+                "coins_unlocked": len(selected_coins)
             }
         else:
             # Payment not found yet

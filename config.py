@@ -139,37 +139,23 @@ SUBSCRIPTION_TIERS = {
     "free": {
         "predictions": 2,
         "price": 0,
-        "coins": [],  # user can pick any 2
+        "coins": 0,
         "telegram_alerts": False,
         "daily_alerts": 0
     },
-    "starter": {
-        "predictions": 5,
-        "price": 9.99,
-        "coins": 3,
-        "telegram_alerts": True,  # ✓ Telegram alerts for signals >70%
-        "daily_alerts": 3  # 3 alerts per day
-    },
     "basic": {
-        "predictions": 3,
-        "price": 14.99,
-        "coins": 3,
-        "telegram_alerts": True,  # ✓ Telegram alerts for signals >70%
-        "daily_alerts": 3  # 3 alerts per day
+        "predictions": 999999,
+        "price": 29.00,
+        "coins": 7,  # 7 coins available
+        "telegram_alerts": True,
+        "daily_alerts": 999
     },
     "pro": {
-        "predictions": 7,
-        "price": 24.99,
-        "coins": 7,
-        "telegram_alerts": True,  # ✓ Telegram alerts for signals >70%
-        "daily_alerts": 999  # Unlimited
-    },
-    "premium": {
-        "predictions": 15,
-        "price": 49.99,
-        "coins": 15,
-        "telegram_alerts": True,  # ✓ Telegram alerts for signals >70%
-        "daily_alerts": 999  # Unlimited
+        "predictions": 999999,
+        "price": 39.00,
+        "coins": 15,  # All 15 coins available
+        "telegram_alerts": True,
+        "daily_alerts": 999
     }
 }
 

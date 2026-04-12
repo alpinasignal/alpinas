@@ -707,10 +707,13 @@ async function checkPayment() {
 
         if (data.success && data.payment_verified) {
             // Payment verified - activate subscription
-            alert('🎉 Payment verified!\n\nYour subscription is now active.\nThank you!');
+            const planName = selectedPlanName === 'basic' ? 'Basic ($29)' : 'Pro ($39)';
+            alert(`🎉 Payment verified!\n\nYour ${planName} plan is now active.\n\nTelegram alerts enabled!\nThank you!`);
 
             // Mark as subscribed (unlimited access)
             localStorage.setItem('alpina_subscribed', 'true');
+            localStorage.setItem('alpina_plan', selectedPlanName);
+            localStorage.setItem('alpina_coins', data.coins_unlocked || 15);
             updateAttemptsDisplay();
 
             // Close modal
