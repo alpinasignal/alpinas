@@ -205,11 +205,15 @@ async def health():
     pt_files = []
     if os.path.exists(models_dir):
         pt_files = [f for f in os.listdir(models_dir) if f.endswith(".pt")]
+    db_url = config.DATABASE_URL
+    db_type = "postgres" if "postgres" in db_url else "sqlite"
     return {
         "status": "ok",
         "models_dir": models_dir,
         "models_count": len(pt_files),
-        "models_ok": len(pt_files) >= 45
+        "models_ok": len(pt_files) >= 45,
+        "db_type": db_type,
+        "db_url_prefix": db_url[:30] + "..." if len(db_url) > 30 else db_url
     }
 
 

@@ -742,7 +742,7 @@ class SubscriptionManager:
 
             # Users by subscription tier
             tier_counts = {}
-            for tier in ["free", "starter", "basic", "pro", "premium"]:
+            for tier in ["free", "basic", "pro"]:
                 count = session.query(Subscription).filter(
                     Subscription.tier == tier,
                     Subscription.is_active == True
